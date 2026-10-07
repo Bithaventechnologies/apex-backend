@@ -3,6 +3,7 @@ const crypto = require("crypto");
 
 const prisma = require("../lib/prisma");
 const { jwtSign } = require("../services/jwtService");
+const { sendEmail } = require("../services/emailService");
 
 /**
  * Generate a 6-digit OTP
@@ -55,7 +56,8 @@ const register = async (req, res) => {
     if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({
         success: false,
-        message: "First name, last name, email and password are required",
+        message:
+          "First name, last name, email and password are required",
       });
     }
 
@@ -98,6 +100,7 @@ const register = async (req, res) => {
         verificationOtp,
         verificationOtpExpiresAt,
       },
+
       select: {
         id: true,
         firstName: true,
@@ -108,24 +111,72 @@ const register = async (req, res) => {
       },
     });
 
-    /*
-     * TODO:
-     * Send verificationOtp to user's email.
-     *
-     * For development we return it.
-     * REMOVE otp from the response in production.
+    /**
+     * Send verification email
      */
+    try {
+      await sendEmail({
+        to: normalizedEmail,
+        subject: "Verify Your Apex Signal Trade Account",
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+            <h2>Welcome to Apex Signal Trade</h2>
 
-    console.log(
-      `Verification OTP for ${normalizedEmail}: ${verificationOtp}`
-    );
+            <p>Hello ${firstName.trim()},</p>
+
+            <p>
+              Thank you for creating an Apex Signal Trade account.
+              Please use the verification code below to verify your email address.
+            </p>
+
+            <div style="
+              margin: 25px 0;
+              padding: 20px;
+              background: #f4f4f4;
+              text-align: center;
+              border-radius: 8px;
+            ">
+              <h1 style="
+                letter-spacing: 8px;
+                margin: 0;
+                font-size: 32px;
+              ">
+                ${verificationOtp}
+              </h1>
+            </div>
+
+            <p>
+              This verification code will expire in <strong>10 minutes</strong>.
+            </p>
+
+            <p>
+              If you did not create this account, please ignore this email.
+            </p>
+
+            <p>
+              Regards,<br />
+              <strong>Apex Signal Trade</strong>
+            </p>
+          </div>
+        `,
+      });
+    } catch (emailError) {
+      console.error(
+        "Registration email failed:",
+        emailError.message
+      );
+
+      /**
+       * The account has already been created.
+       * We don't fail registration because of an email delivery issue.
+       */
+    }
 
     return res.status(201).json({
       success: true,
       message:
-        "Registration successful. Please verify your email with the OTP sent to you.",
+        "Registration successful. Please check your email for the verification OTP.",
       user,
-      verificationOtp,
     });
   } catch (error) {
     console.error("Register error:", error);
@@ -133,6 +184,7 @@ const register = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -177,7 +229,8 @@ const verifyEmail = async (req, res) => {
     if (!user.verificationOtp) {
       return res.status(400).json({
         success: false,
-        message: "No verification OTP found. Please request a new OTP.",
+        message:
+          "No verification OTP found. Please request a new OTP.",
       });
     }
 
@@ -202,11 +255,14 @@ const verifyEmail = async (req, res) => {
       where: {
         id: user.id,
       },
+
       data: {
         emailVerified: true,
+        verified: true,
         verificationOtp: null,
         verificationOtpExpiresAt: null,
       },
+
       select: {
         id: true,
         firstName: true,
@@ -215,6 +271,41 @@ const verifyEmail = async (req, res) => {
         emailVerified: true,
       },
     });
+
+    /**
+     * Optional welcome email after successful verification
+     */
+    try {
+      await sendEmail({
+        to: updatedUser.email,
+        subject: "Welcome to Apex Signal Trade",
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+            <h2>Email Verified Successfully</h2>
+
+            <p>Hello ${updatedUser.firstName},</p>
+
+            <p>
+              Your Apex Signal Trade email address has been successfully verified.
+            </p>
+
+            <p>
+              You can now log in and access your account.
+            </p>
+
+            <p>
+              Regards,<br />
+              <strong>Apex Signal Trade</strong>
+            </p>
+          </div>
+        `,
+      });
+    } catch (emailError) {
+      console.error(
+        "Welcome email failed:",
+        emailError.message
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -227,6 +318,7 @@ const verifyEmail = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -275,20 +367,77 @@ const resendVerification = async (req, res) => {
       where: {
         id: user.id,
       },
+
       data: {
         verificationOtp,
         verificationOtpExpiresAt,
       },
     });
 
-    console.log(
-      `New verification OTP for ${normalizedEmail}: ${verificationOtp}`
-    );
+    /**
+     * Send new verification OTP
+     */
+    try {
+      await sendEmail({
+        to: normalizedEmail,
+        subject: "Your New Apex Signal Trade Verification Code",
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+            <h2>Email Verification</h2>
+
+            <p>Hello ${user.firstName},</p>
+
+            <p>
+              You requested a new email verification code.
+            </p>
+
+            <div style="
+              margin: 25px 0;
+              padding: 20px;
+              background: #f4f4f4;
+              text-align: center;
+              border-radius: 8px;
+            ">
+              <h1 style="
+                letter-spacing: 8px;
+                margin: 0;
+                font-size: 32px;
+              ">
+                ${verificationOtp}
+              </h1>
+            </div>
+
+            <p>
+              This code will expire in <strong>10 minutes</strong>.
+            </p>
+
+            <p>
+              If you did not request this code, please ignore this email.
+            </p>
+
+            <p>
+              Regards,<br />
+              <strong>Apex Signal Trade</strong>
+            </p>
+          </div>
+        `,
+      });
+    } catch (emailError) {
+      console.error(
+        "Resend verification email failed:",
+        emailError.message
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Verification code was generated but could not be sent. Please try again.",
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      message: "A new verification OTP has been generated",
-      verificationOtp,
+      message: "A new verification OTP has been sent to your email",
     });
   } catch (error) {
     console.error("Resend verification error:", error);
@@ -296,6 +445,7 @@ const resendVerification = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -371,6 +521,7 @@ const login = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -398,8 +549,8 @@ const forgotPassword = async (req, res) => {
       },
     });
 
-    /*
-     * We don't reveal whether the email exists.
+    /**
+     * Don't reveal whether the email exists.
      */
     if (!user) {
       return res.status(200).json({
@@ -416,25 +567,85 @@ const forgotPassword = async (req, res) => {
       where: {
         id: user.id,
       },
+
       data: {
         resetPasswordOtp,
         resetPasswordOtpExpiresAt,
       },
     });
 
-    console.log(
-      `Password reset OTP for ${normalizedEmail}: ${resetPasswordOtp}`
-    );
+    /**
+     * Send password reset email
+     */
+    try {
+      await sendEmail({
+        to: normalizedEmail,
+        subject: "Reset Your Apex Signal Trade Password",
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+            <h2>Password Reset Request</h2>
+
+            <p>Hello ${user.firstName},</p>
+
+            <p>
+              We received a request to reset your Apex Signal Trade password.
+            </p>
+
+            <p>
+              Your password reset OTP is:
+            </p>
+
+            <div style="
+              margin: 25px 0;
+              padding: 20px;
+              background: #f4f4f4;
+              text-align: center;
+              border-radius: 8px;
+            ">
+              <h1 style="
+                letter-spacing: 8px;
+                margin: 0;
+                font-size: 32px;
+              ">
+                ${resetPasswordOtp}
+              </h1>
+            </div>
+
+            <p>
+              This OTP expires in <strong>10 minutes</strong>.
+            </p>
+
+            <p>
+              If you did not request a password reset, please ignore this email.
+            </p>
+
+            <p>
+              Regards,<br />
+              <strong>Apex Signal Trade</strong>
+            </p>
+          </div>
+        `,
+      });
+    } catch (emailError) {
+      console.error(
+        "Password reset email failed:",
+        emailError.message
+      );
+
+      /**
+       * Don't expose the OTP or internal email error.
+       */
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to send password reset email. Please try again.",
+      });
+    }
 
     return res.status(200).json({
       success: true,
       message:
         "If an account exists with this email, a password reset OTP will be sent.",
-
-      /*
-       * Remove this before production.
-       */
-      resetPasswordOtp,
     });
   } catch (error) {
     console.error("Forgot password error:", error);
@@ -442,6 +653,7 @@ const forgotPassword = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -461,7 +673,8 @@ const resetPassword = async (req, res) => {
     if (!email || !otp || !newPassword) {
       return res.status(400).json({
         success: false,
-        message: "Email, OTP and new password are required",
+        message:
+          "Email, OTP and new password are required",
       });
     }
 
@@ -520,12 +733,48 @@ const resetPassword = async (req, res) => {
       where: {
         id: user.id,
       },
+
       data: {
         password: hashedPassword,
         resetPasswordOtp: null,
         resetPasswordOtpExpiresAt: null,
       },
     });
+
+    /**
+     * Send confirmation email
+     */
+    try {
+      await sendEmail({
+        to: normalizedEmail,
+        subject: "Your Apex Signal Trade Password Was Changed",
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+            <h2>Password Changed Successfully</h2>
+
+            <p>Hello ${user.firstName},</p>
+
+            <p>
+              Your Apex Signal Trade password has been successfully changed.
+            </p>
+
+            <p>
+              If you did not make this change, please contact support immediately.
+            </p>
+
+            <p>
+              Regards,<br />
+              <strong>Apex Signal Trade</strong>
+            </p>
+          </div>
+        `,
+      });
+    } catch (emailError) {
+      console.error(
+        "Password reset confirmation email failed:",
+        emailError.message
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -537,6 +786,7 @@ const resetPassword = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -547,12 +797,16 @@ const resetPassword = async (req, res) => {
  */
 const changePassword = async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
+    const {
+      currentPassword,
+      newPassword,
+    } = req.body;
 
     if (!currentPassword || !newPassword) {
       return res.status(400).json({
         success: false,
-        message: "Current password and new password are required",
+        message:
+          "Current password and new password are required",
       });
     }
 
@@ -597,10 +851,46 @@ const changePassword = async (req, res) => {
       where: {
         id: user.id,
       },
+
       data: {
         password: hashedPassword,
       },
     });
+
+    /**
+     * Send password changed notification
+     */
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: "Your Apex Signal Trade Password Was Changed",
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+            <h2>Password Changed</h2>
+
+            <p>Hello ${user.firstName},</p>
+
+            <p>
+              Your Apex Signal Trade password has been changed successfully.
+            </p>
+
+            <p>
+              If you did not make this change, please contact support immediately.
+            </p>
+
+            <p>
+              Regards,<br />
+              <strong>Apex Signal Trade</strong>
+            </p>
+          </div>
+        `,
+      });
+    } catch (emailError) {
+      console.error(
+        "Password change email failed:",
+        emailError.message
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -612,48 +902,7 @@ const changePassword = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
-    });
-  }
-};
-
-/**
- * GET CURRENT USER
- * GET /api/auth/me
- */
-const getMe = async (req, res) => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: {
-        id: req.user.id,
-      },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        emailVerified: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      user,
-    });
-  } catch (error) {
-    console.error("Get me error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -666,5 +915,4 @@ module.exports = {
   forgotPassword,
   resetPassword,
   changePassword,
-  getMe,
 };
