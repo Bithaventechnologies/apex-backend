@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
+const AuthRoutes = require("./routes/authRoutes")
 
 const app = express();
 
@@ -18,6 +19,10 @@ app.get("/", (req, res) => {
     message: "Backend is running",
   });
 });
+
+//ROUTES
+
+app.use("/api/auth", AuthRoutes)
 
 // Start server
 app.listen(PORT, () => {
