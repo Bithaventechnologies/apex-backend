@@ -4,25 +4,304 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-
 }
 
 
+// =====================================================
+// USER
+// =====================================================
+
 model User {
-  id                     Int       @id @default(autoincrement())
-  firstName              String
-  lastName               String
-  email                  String    @unique
-  password               String
+  id              Int      @id @default(autoincrement())
 
-  emailVerified          Boolean   @default(false)
+  name            String   @default("")
+  username        String   @default("")
 
-  verificationOtp        String?
+  uid             String   @unique
+
+  email           String   @unique
+  password        String
+
+  balance         Float    @default(0)
+
+  btcBal          Float    @default(0)
+  usdtBal         Float    @default(0)
+  ethBal          Float    @default(0)
+  solBal          Float    @default(0)
+
+  verified        Boolean  @default(false)
+
+  referralId      String   @default("")
+
+  bitcoin         String   @default("")
+  sol             String   @default("")
+  ethereum        String   @default("")
+
+  profilePic      String   @default("")
+
+  phoneNumber     String   @default("")
+  dob             String   @default("")
+  state           String   @default("")
+  city            String   @default("")
+
+  bankName        String   @default("")
+  accountNumber   String   @default("")
+  routingNumber   String   @default("")
+
+  type            UserType @default(user)
+
+  // Authentication fields
+  emailVerified            Boolean   @default(false)
+
+  verificationOtp          String?
   verificationOtpExpiresAt DateTime?
 
-  resetPasswordOtp       String?
+  resetPasswordOtp          String?
   resetPasswordOtpExpiresAt DateTime?
 
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([type])
+  @@map("users")
+}
+
+
+// =====================================================
+// PLAN
+// =====================================================
+
+model Plan {
+  id          Int      @id @default(autoincrement())
+
+  name        String
+  returns     String
+  minAmount   String
+  duration    String
+  maxAmount   String
+
+  // Optional user owner/reference
+  uid         String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([uid])
+  @@map("plans")
+}
+
+
+// =====================================================
+// INVESTMENT
+// =====================================================
+
+model Investment {
+  id              Int      @id @default(autoincrement())
+
+  uid             String
+
+  name            String
+
+  email           String
+
+  plan_id         String
+  plan_name       String
+
+  method          String
+
+  duration        String
+
+  amount          Float
+
+  returns         Float
+
+  active          Boolean  @default(false)
+
+  creditedAmount  Float    @default(0)
+
+  lastCreditedAt  DateTime?
+
+  status          String   @default("pending")
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([uid])
+  @@index([plan_id])
+  @@index([status])
+  @@map("investments")
+}
+
+
+// =====================================================
+// WITHDRAWAL
+// =====================================================
+
+model Withdrawal {
+  id              Int      @id @default(autoincrement())
+
+  uid             String
+
+  amount          Float    @default(0)
+
+  to              String   @default("")
+
+  method          String   @default("")
+
+  emailAddress    String   @default("")
+
+  walletAddress   String   @default("")
+
+  bankName        String   @default("")
+
+  accountName     String   @default("")
+
+  routingNumber   String   @default("")
+
+  bankAccount     String   @default("")
+
+  transaction_id  String
+
+  status          TransactionStatus @default(pending)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([uid])
+  @@index([status])
+  @@index([transaction_id])
+  @@map("withdrawals")
+}
+
+
+// =====================================================
+// TRANSACTION
+// =====================================================
+
+model Transaction {
+  id                Int      @id @default(autoincrement())
+
+  uid               String   @default("")
+
+  amount            Float    @default(0)
+
+  investment_price  Float    @default(0)
+
+  from              String   @default("")
+
+  to                String   @default("")
+
+  method            String   @default("")
+
+  emailAddress      String   @default("")
+
+  walletAddress     String   @default("")
+
+  bankName          String   @default("")
+
+  bankAccount       String   @default("")
+
+  accountName       String   @default("")
+
+  routingNumber     String   @default("")
+
+  plan_name         String   @default("")
+
+  plan_id           String   @default("")
+
+  investment_id     String   @default("")
+
+  type              TransactionType
+
+  status            TransactionStatus @default(pending)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([uid])
+  @@index([type])
+  @@index([status])
+  @@index([investment_id])
+  @@map("transactions")
+}
+
+
+// =====================================================
+// EARNING
+// =====================================================
+
+model Earning {
+  id              Int      @id @default(autoincrement())
+
+  uid             String
+
+  amount          Float
+
+  plan_name       String
+
+  plan_id         String
+
+  investment_id   String
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([uid])
+  @@index([plan_id])
+  @@index([investment_id])
+  @@map("earnings")
+}
+
+
+// =====================================================
+// DEPOSIT
+// =====================================================
+
+model Deposit {
+  id              Int      @id @default(autoincrement())
+
+  uid             String
+
+  amount          Float    @default(0)
+
+  from            String
+
+  to              String
+
+  method          String
+
+  transaction_id  String
+
+  status          TransactionStatus @default(pending)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([uid])
+  @@index([status])
+  @@index([transaction_id])
+  @@map("deposits")
+}
+
+
+// =====================================================
+// ENUMS
+// =====================================================
+
+enum UserType {
+  admin
+  user
+}
+
+enum TransactionType {
+  deposit
+  withdrawal
+  investment
+  earn
+}
+
+enum TransactionStatus {
+  pending
+  approved
+  declined
 }

@@ -8,7 +8,7 @@ const {
   forgotPassword,
   resetPassword,
   changePassword,
-  getMe,
+
 } = require("../controllers/authController");
 
 const {
@@ -86,15 +86,5 @@ router.post(
   changePassword
 );
 
-/**
- * Get current user
- * GET /api/auth/me
- */
-router.get(
-  "/me",
-  verifyToken,
-  checkUser,
-  getMe
-);
 
 module.exports = router;
