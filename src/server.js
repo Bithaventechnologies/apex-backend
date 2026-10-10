@@ -8,6 +8,7 @@ const withdrawalRoutes = require("./routes/withdrawalRoutes");
 const planRoutes = require("./routes/planRoutes");
 const investmentRoutes = require("./routes/investmentRoutes");
 const earningRoutes = require("./routes/earningRoutes");
+const transactionRoutes = require("./routes/transactionRoutes");
 
 //Additional imports for admin routes
 const adminUserRoutes = require("./routes/admin/adminUseRoutes");
@@ -16,7 +17,7 @@ const adminWithdrawalRoutes = require("./routes/admin/adminWithdrawalRoutes")
 const adminEarningRoutes = require("./routes/admin/adminEarningRoutes")
 const adminInvestmentRoutes = require("./routes/admin/adminInvestmentRoutes")
 const adminPlanRoutes = require("./routes/admin/adminPlanRoutes")
-const transactionRoutes = require("./routes/transactionRoutes");
+const adminAuthRoutes = require("./routes/admin/adminAuthRoutes")
 
 const app = express();
 
@@ -52,13 +53,15 @@ app.use('/api/withdrawals', withdrawalRoutes)
 app.use('/api/plans', planRoutes)
 app.use('/api/investments', investmentRoutes)
 app.use('/api/earnings', earningRoutes)
+app.use('/api/transactions', transactionRoutes)
 app.use('/api/admin/users', adminUserRoutes)
 app.use('/api/admin/deposits', adminDepositRoutes)
 app.use('/api/admin/withdrawals', adminWithdrawalRoutes)
 app.use('/api/admin/earnings', adminEarningRoutes)
 app.use('/api/admin/investments', adminInvestmentRoutes)
 app.use('/api/admin/plans', adminPlanRoutes)
-app.use('/api/transactions', transactionRoutes)
+app.use("/api/admin/auth" , adminAuthRoutes)
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
