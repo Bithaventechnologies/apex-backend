@@ -215,6 +215,7 @@ const verifyEmail = async (req, res) => {
   try {
     const { email, otp } = req.body;
 
+    // Validate request
     if (!email || !otp) {
       return res.status(400).json({
         success: false,
@@ -223,7 +224,9 @@ const verifyEmail = async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    const submittedOtp = String(otp).trim();
 
+    // Find user by email
     const user = await prisma.user.findUnique({
       where: {
         email: normalizedEmail,
@@ -237,6 +240,7 @@ const verifyEmail = async (req, res) => {
       });
     }
 
+    // Check whether email is already verified
     if (user.emailVerified) {
       return res.status(400).json({
         success: false,
@@ -244,85 +248,84 @@ const verifyEmail = async (req, res) => {
       });
     }
 
+    // Check whether OTP exists
     if (!user.verificationOtp) {
       return res.status(400).json({
         success: false,
-        message:
-          "No verification OTP found. Please request a new OTP.",
+        message: "No verification OTP found. Please request a new OTP.",
       });
     }
 
+    // Check OTP expiration
     if (
       !user.verificationOtpExpiresAt ||
-      user.verificationOtpExpiresAt < new Date()
+      new Date(user.verificationOtpExpiresAt) < new Date()
     ) {
       return res.status(400).json({
         success: false,
-        message: "Verification OTP has expired",
+        message: "Verification OTP has expired. Please request a new OTP.",
       });
     }
 
-    if (user.verificationOtp !== otp) {
+    // Validate OTP
+    if (String(user.verificationOtp).trim() !== submittedOtp) {
       return res.status(400).json({
         success: false,
         message: "Invalid verification OTP",
       });
     }
 
+    // Update verification status using fields from your Prisma schema
     const updatedUser = await prisma.user.update({
       where: {
         id: user.id,
       },
-
       data: {
         emailVerified: true,
         verified: true,
         verificationOtp: null,
         verificationOtpExpiresAt: null,
       },
-
       select: {
         id: true,
-        firstName: true,
-        lastName: true,
+        uid: true,
+        name: true,
+        username: true,
         email: true,
         emailVerified: true,
+        verified: true,
+        createdAt: true,
       },
     });
 
-    /**
-     * Optional welcome email after successful verification
-     */
+    // Send welcome email without failing verification if email delivery fails
     try {
       await sendEmail({
         to: updatedUser.email,
-        subject: "Welcome to Apex Signal Trade",
+        subject: "Welcome to Trust Signal Trade",
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-            <h2>Email Verified Successfully</h2>
+            <div>
+              <h2>Email Verified Successfully</h2>
 
-            <p>Hello ${updatedUser.firstName},</p>
+              <p>Hello ${updatedUser.name || updatedUser.username || "there"},</p>
 
-            <p>
-              Your Apex Signal Trade email address has been successfully verified.
-            </p>
+              <p>
+                Your Trust Signal Trade email address has been successfully verified.
+              </p>
 
-            <p>
-              You can now log in and access your account.
-            </p>
+              <p>You can now log in and access your account.</p>
 
-            <p>
-              Regards,<br />
-              <strong>Apex Signal Trade</strong>
-            </p>
+              <p>
+                Regards,<br />
+                <strong>Trust Signal Trade</strong>
+              </p>
+            </div>
           </div>
         `,
       });
     } catch (emailError) {
-      console.error(
-        "Welcome email failed:",
-        emailError.message
-      );
+      console.error("Welcome email failed:", emailError.message);
     }
 
     return res.status(200).json({
@@ -336,7 +339,6 @@ const verifyEmail = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message,
     });
   }
 };
@@ -398,7 +400,7 @@ const resendVerification = async (req, res) => {
     try {
       await sendEmail({
         to: normalizedEmail,
-        subject: "Your New Apex Signal Trade Verification Code",
+        subject: "Your New Trust Signal Trade Verification Code",
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
             <h2>Email Verification</h2>
@@ -435,7 +437,7 @@ const resendVerification = async (req, res) => {
 
             <p>
               Regards,<br />
-              <strong>Apex Signal Trade</strong>
+              <strong>Trust Signal Trade</strong>
             </p>
           </div>
         `,
@@ -598,7 +600,7 @@ const forgotPassword = async (req, res) => {
     try {
       await sendEmail({
         to: normalizedEmail,
-        subject: "Reset Your Apex Signal Trade Password",
+        subject: "Reset Your Trust Signal Trade Password",
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
             <h2>Password Reset Request</h2>
@@ -639,7 +641,7 @@ const forgotPassword = async (req, res) => {
 
             <p>
               Regards,<br />
-              <strong>Apex Signal Trade</strong>
+              <strong>Trust Signal Trade</strong>
             </p>
           </div>
         `,
@@ -765,7 +767,7 @@ const resetPassword = async (req, res) => {
     try {
       await sendEmail({
         to: normalizedEmail,
-        subject: "Your Apex Signal Trade Password Was Changed",
+        subject: "Your Trust Signal Trade Password Was Changed",
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
             <h2>Password Changed Successfully</h2>
@@ -773,7 +775,7 @@ const resetPassword = async (req, res) => {
             <p>Hello ${user.firstName},</p>
 
             <p>
-              Your Apex Signal Trade password has been successfully changed.
+              Your Trust Signal Trade password has been successfully changed.
             </p>
 
             <p>
@@ -782,7 +784,7 @@ const resetPassword = async (req, res) => {
 
             <p>
               Regards,<br />
-              <strong>Apex Signal Trade</strong>
+              <strong>Trust Signal Trade</strong>
             </p>
           </div>
         `,
@@ -881,7 +883,7 @@ const changePassword = async (req, res) => {
     try {
       await sendEmail({
         to: user.email,
-        subject: "Your Apex Signal Trade Password Was Changed",
+        subject: "Your Trust Signal Trade Password Was Changed",
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
             <h2>Password Changed</h2>
@@ -889,7 +891,7 @@ const changePassword = async (req, res) => {
             <p>Hello ${user.firstName},</p>
 
             <p>
-              Your Apex Signal Trade password has been changed successfully.
+              Your Trust Signal Trade password has been changed successfully.
             </p>
 
             <p>
@@ -898,7 +900,7 @@ const changePassword = async (req, res) => {
 
             <p>
               Regards,<br />
-              <strong>Apex Signal Trade</strong>
+              <strong>Trust Signal Trade</strong>
             </p>
           </div>
         `,
