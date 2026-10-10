@@ -1,3 +1,4 @@
+
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
@@ -5,29 +6,47 @@ const prisma = require("../lib/prisma");
 const { jwtSign } = require("../services/jwtService");
 const { sendEmail } = require("../services/emailService");
 
-/**
- * Generate a 6-digit OTP
- */
+const APP_NAME = "Trust Signal Trade";
+const OTP_EXPIRY_MINUTES = 10;
+
 const generateOtp = () => {
   return crypto.randomInt(100000, 1000000).toString();
 };
 
-/**
- * OTP expires in 10 minutes
- */
 const getOtpExpiry = () => {
-  return new Date(Date.now() + 10 * 60 * 1000);
+  return new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 };
 
-/**
- * Generate JWT
- */
+const normalizeEmail = (email) => {
+  return typeof email === "string" ? email.trim().toLowerCase() : "";
+};
+
+const escapeHtml = (value = "") => {
+  return String(value).replace(/[&<>"']/g, (character) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+
+    return entities[character];
+  });
+};
+
+const getFirstName = (user) => {
+  return user?.name?.trim().split(/\s+/)[0] || "there";
+};
+
 const generateToken = (user) => {
   return new Promise((resolve, reject) => {
     jwtSign(
       {
         id: user.id,
+        uid: user.uid,
         email: user.email,
+        type: user.type,
       },
       (error, token) => {
         if (error) {
@@ -40,24 +59,90 @@ const generateToken = (user) => {
   });
 };
 
+const sendVerificationEmail = async (email, firstName, otp) => {
+  await sendEmail({
+    to: email,
+    subject: `Verify Your ${APP_NAME} Account`,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#222">
+        <h2>Welcome to ${APP_NAME}</h2>
+        <p>Hello ${escapeHtml(firstName)},</p>
+        <p>Thank you for creating an account. Use the verification code below
+        to verify your email address.</p>
+        <div style="margin:25px 0;padding:20px;background:#f4f4f4;
+          text-align:center;border-radius:8px">
+          <h1 style="letter-spacing:8px;margin:0;font-size:32px">
+            ${otp}
+          </h1>
+        </div>
+        <p>This code expires in <strong>10 minutes</strong>.</p>
+        <p>If you did not create this account, you can ignore this email.</p>
+        <p>Regards,<br/><strong>${APP_NAME}</strong></p>
+      </div>
+    `,
+  });
+};
+
+const sendPasswordResetEmail = async (email, firstName, otp) => {
+  await sendEmail({
+    to: email,
+    subject: `Reset Your ${APP_NAME} Password`,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#222">
+        <h2>Password Reset Request</h2>
+        <p>Hello ${escapeHtml(firstName)},</p>
+        <p>Use the code below to reset your password.</p>
+        <div style="margin:25px 0;padding:20px;background:#f4f4f4;
+          text-align:center;border-radius:8px">
+          <h1 style="letter-spacing:8px;margin:0;font-size:32px">
+            ${otp}
+          </h1>
+        </div>
+        <p>This code expires in <strong>10 minutes</strong>.</p>
+        <p>If you did not request a password reset, ignore this email.</p>
+        <p>Regards,<br/><strong>${APP_NAME}</strong></p>
+      </div>
+    `,
+  });
+};
+
+const sendPasswordChangedEmail = async (email, firstName) => {
+  await sendEmail({
+    to: email,
+    subject: `Your ${APP_NAME} Password Was Changed`,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#222">
+        <h2>Password Changed Successfully</h2>
+        <p>Hello ${escapeHtml(firstName)},</p>
+        <p>Your password has been changed successfully.</p>
+        <p>If you did not make this change, contact support immediately.</p>
+        <p>Regards,<br/><strong>${APP_NAME}</strong></p>
+      </div>
+    `,
+  });
+};
+
 /**
  * REGISTER
  * POST /api/auth/register
  */
 const register = async (req, res) => {
   try {
-    const {
-      firstName,
-      lastName,
-      email,
-      password,
-    } = req.body;
+    const { firstName, lastName, email, password } = req.body || {};
 
-    if (!firstName || !lastName || !email || !password) {
+    if (
+      typeof firstName !== "string" ||
+      typeof lastName !== "string" ||
+      !firstName.trim() ||
+      !lastName.trim() ||
+      typeof email !== "string" ||
+      !email.trim() ||
+      typeof password !== "string" ||
+      !password
+    ) {
       return res.status(400).json({
         success: false,
-        message:
-          "First name, last name, email and password are required",
+        message: "First name, last name, email and password are required",
       });
     }
 
@@ -68,12 +153,13 @@ const register = async (req, res) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const cleanFirstName = firstName.trim();
+    const cleanLastName = lastName.trim();
+    const fullName = `${cleanFirstName} ${cleanLastName}`;
+    const normalizedEmail = normalizeEmail(email);
 
     const existingUser = await prisma.user.findUnique({
-      where: {
-        email: normalizedEmail,
-      },
+      where: { email: normalizedEmail },
     });
 
     if (existingUser) {
@@ -84,96 +170,53 @@ const register = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-
     const verificationOtp = generateOtp();
     const verificationOtpExpiresAt = getOtpExpiry();
 
+    // Save the combined name in the existing Prisma `name` field.
     const user = await prisma.user.create({
       data: {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
+        name: fullName,
         email: normalizedEmail,
         password: hashedPassword,
-
         emailVerified: false,
-
+        verified: false,
         verificationOtp,
         verificationOtpExpiresAt,
       },
-
       select: {
         id: true,
-        firstName: true,
-        lastName: true,
+        uid: true,
+        name: true,
         email: true,
         emailVerified: true,
+        verified: true,
         createdAt: true,
       },
     });
 
-    /**
-     * Send verification email
-     */
     try {
-      await sendEmail({
-        to: normalizedEmail,
-        subject: "Verify Your Trust Signal Trade Account",
-        html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-            <h2>Welcome to Trust Signal Trade</h2>
-
-            <p>Hello ${firstName.trim()},</p>
-
-            <p>
-              Thank you for creating an Trust Signal Trade account.
-              Please use the verification code below to verify your email address.
-            </p>
-
-            <div style="
-              margin: 25px 0;
-              padding: 20px;
-              background: #f4f4f4;
-              text-align: center;
-              border-radius: 8px;
-            ">
-              <h1 style="
-                letter-spacing: 8px;
-                margin: 0;
-                font-size: 32px;
-              ">
-                ${verificationOtp}
-              </h1>
-            </div>
-
-            <p>
-              This verification code will expire in <strong>10 minutes</strong>.
-            </p>
-
-            <p>
-              If you did not create this account, please ignore this email.
-            </p>
-
-            <p>
-              Regards,<br />
-              <strong>Trust Signal Trade</strong>
-            </p>
-          </div>
-        `,
-      });
-    } catch (emailError) {
-      console.error(
-        "Registration email failed:",
-        emailError.message
+      await sendVerificationEmail(
+        normalizedEmail,
+        cleanFirstName,
+        verificationOtp
       );
+    } catch (emailError) {
+      console.error("Registration email failed:", emailError.message);
 
-      /**
-       * The account has already been created.
-       * We don't fail registration because of an email delivery issue.
-       */
+      // The account exists, so the user can request a new OTP.
+      return res.status(201).json({
+        success: true,
+        emailSent: false,
+        message:
+          "Your account was created, but the verification email could not be sent. Please request a new verification code.",
+        user,
+      });
     }
 
     return res.status(201).json({
       success: true,
+      emailSent: true,
       message:
         "Registration successful. Please check your email for the verification OTP.",
       user,
@@ -181,10 +224,16 @@ const register = async (req, res) => {
   } catch (error) {
     console.error("Register error:", error);
 
+    if (error.code === "P2002") {
+      return res.status(409).json({
+        success: false,
+        message: "An account with this email already exists",
+      });
+    }
+
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message,
+      message: "Unable to register at this time. Please try again.",
     });
   }
 };
@@ -195,21 +244,24 @@ const register = async (req, res) => {
  */
 const verifyEmail = async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const { email, otp } = req.body || {};
 
-    if (!email || !otp) {
+    if (
+      typeof email !== "string" ||
+      !email.trim() ||
+      typeof otp !== "string" ||
+      !/^\d{6}$/.test(otp)
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Email and OTP are required",
+        message: "A valid email and 6-digit OTP are required",
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
-      where: {
-        email: normalizedEmail,
-      },
+      where: { email: normalizedEmail },
     });
 
     if (!user) {
@@ -226,21 +278,17 @@ const verifyEmail = async (req, res) => {
       });
     }
 
-    if (!user.verificationOtp) {
+    if (!user.verificationOtp || !user.verificationOtpExpiresAt) {
       return res.status(400).json({
         success: false,
-        message:
-          "No verification OTP found. Please request a new OTP.",
+        message: "No verification OTP found. Please request a new OTP.",
       });
     }
 
-    if (
-      !user.verificationOtpExpiresAt ||
-      user.verificationOtpExpiresAt < new Date()
-    ) {
+    if (user.verificationOtpExpiresAt < new Date()) {
       return res.status(400).json({
         success: false,
-        message: "Verification OTP has expired",
+        message: "Verification OTP has expired. Please request a new one.",
       });
     }
 
@@ -252,18 +300,14 @@ const verifyEmail = async (req, res) => {
     }
 
     const updatedUser = await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-
+      where: { id: user.id },
       data: {
         emailVerified: true,
         verified: true,
         verificationOtp: null,
         verificationOtpExpiresAt: null,
       },
-
-    select: {
+      select: {
         id: true,
         uid: true,
         name: true,
@@ -275,39 +319,22 @@ const verifyEmail = async (req, res) => {
       },
     });
 
-    /**
-     * Optional welcome email after successful verification
-     */
     try {
       await sendEmail({
         to: updatedUser.email,
-        subject: "Welcome to Trust Signal Trade",
+        subject: `Welcome to ${APP_NAME}`,
         html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+          <div style="font-family:Arial,sans-serif;line-height:1.6;color:#222">
             <h2>Email Verified Successfully</h2>
-
-            <p>Hello ${updatedUser.firstName},</p>
-
-            <p>
-              Your Trust Signal Trade email address has been successfully verified.
-            </p>
-
-            <p>
-              You can now log in and access your account.
-            </p>
-
-            <p>
-              Regards,<br />
-              <strong>Trust Signal Trade</strong>
-            </p>
+            <p>Hello ${escapeHtml(getFirstName(updatedUser))},</p>
+            <p>Your email address has been verified successfully.</p>
+            <p>You can now log in to your account.</p>
+            <p>Regards,<br/><strong>${APP_NAME}</strong></p>
           </div>
         `,
       });
     } catch (emailError) {
-      console.error(
-        "Welcome email failed:",
-        emailError.message
-      );
+      console.error("Welcome email failed:", emailError.message);
     }
 
     return res.status(200).json({
@@ -320,8 +347,7 @@ const verifyEmail = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message,
+      message: "Unable to verify email at this time. Please try again.",
     });
   }
 };
@@ -332,21 +358,19 @@ const verifyEmail = async (req, res) => {
  */
 const resendVerification = async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email } = req.body || {};
 
-    if (!email) {
+    if (typeof email !== "string" || !email.trim()) {
       return res.status(400).json({
         success: false,
         message: "Email is required",
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
-      where: {
-        email: normalizedEmail,
-      },
+      where: { email: normalizedEmail },
     });
 
     if (!user) {
@@ -366,77 +390,29 @@ const resendVerification = async (req, res) => {
     const verificationOtp = generateOtp();
     const verificationOtpExpiresAt = getOtpExpiry();
 
-    await prisma.user.update({
-      where: {
-        id: user.id,
-      },
+    // Send first; only replace the stored code if delivery succeeds.
+    try {
+      await sendVerificationEmail(
+        normalizedEmail,
+        getFirstName(user),
+        verificationOtp
+      );
+    } catch (emailError) {
+      console.error("Resend verification email failed:", emailError.message);
 
+      return res.status(500).json({
+        success: false,
+        message: "Unable to send a verification code. Please try again.",
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
       data: {
         verificationOtp,
         verificationOtpExpiresAt,
       },
     });
-
-    /**
-     * Send new verification OTP
-     */
-    try {
-      await sendEmail({
-        to: normalizedEmail,
-        subject: "Your New Trust Signal Trade Verification Code",
-        html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-            <h2>Email Verification</h2>
-
-            <p>Hello ${user.firstName},</p>
-
-            <p>
-              You requested a new email verification code.
-            </p>
-
-            <div style="
-              margin: 25px 0;
-              padding: 20px;
-              background: #f4f4f4;
-              text-align: center;
-              border-radius: 8px;
-            ">
-              <h1 style="
-                letter-spacing: 8px;
-                margin: 0;
-                font-size: 32px;
-              ">
-                ${verificationOtp}
-              </h1>
-            </div>
-
-            <p>
-              This code will expire in <strong>10 minutes</strong>.
-            </p>
-
-            <p>
-              If you did not request this code, please ignore this email.
-            </p>
-
-            <p>
-              Regards,<br />
-              <strong>Trust Signal Trade</strong>
-            </p>
-          </div>
-        `,
-      });
-    } catch (emailError) {
-      console.error(
-        "Resend verification email failed:",
-        emailError.message
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Verification code was generated but could not be sent. Please try again.",
-      });
-    }
 
     return res.status(200).json({
       success: true,
@@ -447,8 +423,7 @@ const resendVerification = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message,
+      message: "Unable to resend the verification code. Please try again.",
     });
   }
 };
@@ -459,21 +434,19 @@ const resendVerification = async (req, res) => {
  */
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
 
-    if (!email || !password) {
+    if (typeof email !== "string" || !email.trim() || !password) {
       return res.status(400).json({
         success: false,
         message: "Email and password are required",
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
-      where: {
-        email: normalizedEmail,
-      },
+      where: { email: normalizedEmail },
     });
 
     if (!user) {
@@ -483,10 +456,7 @@ const login = async (req, res) => {
       });
     }
 
-    const passwordMatch = await bcrypt.compare(
-      password,
-      user.password
-    );
+    const passwordMatch = await bcrypt.compare(password, user.password);
 
     if (!passwordMatch) {
       return res.status(401).json({
@@ -509,13 +479,15 @@ const login = async (req, res) => {
       success: true,
       message: "Login successful",
       token,
-
       user: {
         id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
+        uid: user.uid,
+        name: user.name,
+        username: user.username,
         email: user.email,
         emailVerified: user.emailVerified,
+        verified: user.verified,
+        type: user.type,
       },
     });
   } catch (error) {
@@ -523,8 +495,7 @@ const login = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message,
+      message: "Unable to log in at this time. Please try again.",
     });
   }
 };
@@ -535,128 +506,68 @@ const login = async (req, res) => {
  */
 const forgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email } = req.body || {};
 
-    if (!email) {
+    if (typeof email !== "string" || !email.trim()) {
       return res.status(400).json({
         success: false,
         message: "Email is required",
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
-      where: {
-        email: normalizedEmail,
-      },
+      where: { email: normalizedEmail },
     });
 
-    /**
-     * Don't reveal whether the email exists.
-     */
+    // Do not reveal whether an account exists.
+    const genericMessage =
+      "If an account exists with this email, a password reset OTP will be sent.";
+
     if (!user) {
       return res.status(200).json({
         success: true,
-        message:
-          "If an account exists with this email, a password reset OTP will be sent.",
+        message: genericMessage,
       });
     }
 
     const resetPasswordOtp = generateOtp();
     const resetPasswordOtpExpiresAt = getOtpExpiry();
 
-    await prisma.user.update({
-      where: {
-        id: user.id,
-      },
+    try {
+      await sendPasswordResetEmail(
+        normalizedEmail,
+        getFirstName(user),
+        resetPasswordOtp
+      );
+    } catch (emailError) {
+      console.error("Password reset email failed:", emailError.message);
 
+      return res.status(500).json({
+        success: false,
+        message: "Unable to send a password reset email. Please try again.",
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
       data: {
         resetPasswordOtp,
         resetPasswordOtpExpiresAt,
       },
     });
 
-    /**
-     * Send password reset email
-     */
-    try {
-      await sendEmail({
-        to: normalizedEmail,
-        subject: "Reset Your Trust Signal Trade Password",
-        html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-            <h2>Password Reset Request</h2>
-
-            <p>Hello ${user.firstName},</p>
-
-            <p>
-              We received a request to reset your Trust Signal Trade password.
-            </p>
-
-            <p>
-              Your password reset OTP is:
-            </p>
-
-            <div style="
-              margin: 25px 0;
-              padding: 20px;
-              background: #f4f4f4;
-              text-align: center;
-              border-radius: 8px;
-            ">
-              <h1 style="
-                letter-spacing: 8px;
-                margin: 0;
-                font-size: 32px;
-              ">
-                ${resetPasswordOtp}
-              </h1>
-            </div>
-
-            <p>
-              This OTP expires in <strong>10 minutes</strong>.
-            </p>
-
-            <p>
-              If you did not request a password reset, please ignore this email.
-            </p>
-
-            <p>
-              Regards,<br />
-              <strong>Trust Signal Trade</strong>
-            </p>
-          </div>
-        `,
-      });
-    } catch (emailError) {
-      console.error(
-        "Password reset email failed:",
-        emailError.message
-      );
-
-      /**
-       * Don't expose the OTP or internal email error.
-       */
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to send password reset email. Please try again.",
-      });
-    }
-
     return res.status(200).json({
       success: true,
-      message:
-        "If an account exists with this email, a password reset OTP will be sent.",
+      message: genericMessage,
     });
   } catch (error) {
     console.error("Forgot password error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message,
+      message: "Unable to process your request. Please try again.",
     });
   }
 };
@@ -667,17 +578,19 @@ const forgotPassword = async (req, res) => {
  */
 const resetPassword = async (req, res) => {
   try {
-    const {
-      email,
-      otp,
-      newPassword,
-    } = req.body;
+    const { email, otp, newPassword } = req.body || {};
 
-    if (!email || !otp || !newPassword) {
+    if (
+      typeof email !== "string" ||
+      !email.trim() ||
+      typeof otp !== "string" ||
+      !/^\d{6}$/.test(otp) ||
+      typeof newPassword !== "string" ||
+      !newPassword
+    ) {
       return res.status(400).json({
         success: false,
-        message:
-          "Email, OTP and new password are required",
+        message: "Email, valid 6-digit OTP and new password are required",
       });
     }
 
@@ -688,25 +601,16 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
-      where: {
-        email: normalizedEmail,
-      },
+      where: { email: normalizedEmail },
     });
 
-    if (!user) {
+    if (!user || !user.resetPasswordOtp) {
       return res.status(400).json({
         success: false,
-        message: "Invalid reset request",
-      });
-    }
-
-    if (!user.resetPasswordOtp) {
-      return res.status(400).json({
-        success: false,
-        message: "No password reset OTP found",
+        message: "Invalid password reset request",
       });
     }
 
@@ -727,16 +631,10 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(
-      newPassword,
-      12
-    );
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
 
     await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-
+      where: { id: user.id },
       data: {
         password: hashedPassword,
         resetPasswordOtp: null,
@@ -744,34 +642,11 @@ const resetPassword = async (req, res) => {
       },
     });
 
-    /**
-     * Send confirmation email
-     */
     try {
-      await sendEmail({
-        to: normalizedEmail,
-        subject: "Your Trust Signal Trade Password Was Changed",
-        html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-            <h2>Password Changed Successfully</h2>
-
-            <p>Hello ${user.firstName},</p>
-
-            <p>
-              Your Trust Signal Trade password has been successfully changed.
-            </p>
-
-            <p>
-              If you did not make this change, please contact support immediately.
-            </p>
-
-            <p>
-              Regards,<br />
-              <strong>Trust Signal Trade</strong>
-            </p>
-          </div>
-        `,
-      });
+      await sendPasswordChangedEmail(
+        normalizedEmail,
+        getFirstName(user)
+      );
     } catch (emailError) {
       console.error(
         "Password reset confirmation email failed:",
@@ -788,8 +663,7 @@ const resetPassword = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message,
+      message: "Unable to reset your password. Please try again.",
     });
   }
 };
@@ -797,19 +671,21 @@ const resetPassword = async (req, res) => {
 /**
  * CHANGE PASSWORD
  * POST /api/auth/change-password
+ * Requires your authentication middleware.
  */
 const changePassword = async (req, res) => {
   try {
-    const {
-      currentPassword,
-      newPassword,
-    } = req.body;
+    const { currentPassword, newPassword } = req.body || {};
 
-    if (!currentPassword || !newPassword) {
+    if (
+      typeof currentPassword !== "string" ||
+      !currentPassword ||
+      typeof newPassword !== "string" ||
+      !newPassword
+    ) {
       return res.status(400).json({
         success: false,
-        message:
-          "Current password and new password are required",
+        message: "Current password and new password are required",
       });
     }
 
@@ -820,10 +696,25 @@ const changePassword = async (req, res) => {
       });
     }
 
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Your new password must differ from your current password",
+      });
+    }
+
+    // Your JWT must contain the user's numeric database ID.
+    const userId = Number(req.user?.id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({
+        success: false,
+        message: "Please log in again",
+      });
+    }
+
     const user = await prisma.user.findUnique({
-      where: {
-        id: req.user.id,
-      },
+      where: { id: userId },
     });
 
     if (!user) {
@@ -845,49 +736,18 @@ const changePassword = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(
-      newPassword,
-      12
-    );
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
 
     await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-
-      data: {
-        password: hashedPassword,
-      },
+      where: { id: user.id },
+      data: { password: hashedPassword },
     });
 
-    /**
-     * Send password changed notification
-     */
     try {
-      await sendEmail({
-        to: user.email,
-        subject: "Your Trust Signal Trade Password Was Changed",
-        html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-            <h2>Password Changed</h2>
-
-            <p>Hello ${user.firstName},</p>
-
-            <p>
-              Your Trust Signal Trade password has been changed successfully.
-            </p>
-
-            <p>
-              If you did not make this change, please contact support immediately.
-            </p>
-
-            <p>
-              Regards,<br />
-              <strong>Trust Signal Trade</strong>
-            </p>
-          </div>
-        `,
-      });
+      await sendPasswordChangedEmail(
+        user.email,
+        getFirstName(user)
+      );
     } catch (emailError) {
       console.error(
         "Password change email failed:",
@@ -904,8 +764,7 @@ const changePassword = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message,
+      message: "Unable to change your password. Please try again.",
     });
   }
 };
