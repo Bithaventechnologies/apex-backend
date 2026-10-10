@@ -44,10 +44,14 @@ const generateToken = (user) => {
  * REGISTER
  * POST /api/auth/register
  */
-
 const register = async (req, res) => {
   try {
-    const { firstName, lastName, email, password } = req.body;
+    const {
+      firstName,
+      lastName,
+      email,
+      password,
+    } = req.body;
 
     if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({
@@ -57,7 +61,7 @@ const register = async (req, res) => {
       });
     }
 
-    if (typeof password !== "string" || password.length < 8) {
+    if (password.length < 8) {
       return res.status(400).json({
         success: false,
         message: "Password must be at least 8 characters",
@@ -65,15 +69,6 @@ const register = async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const trimmedFirstName = firstName.trim();
-    const trimmedLastName = lastName.trim();
-
-    if (!trimmedFirstName || !trimmedLastName) {
-      return res.status(400).json({
-        success: false,
-        message: "First name and last name cannot be empty",
-      });
-    }
 
     const existingUser = await prisma.user.findUnique({
       where: {
@@ -93,45 +88,44 @@ const register = async (req, res) => {
     const verificationOtp = generateOtp();
     const verificationOtpExpiresAt = getOtpExpiry();
 
-    // Your Prisma schema uses `name` and `username`,
-    // not `firstName` and `lastName`.
-    const fullName = `${trimmedFirstName} ${trimmedLastName}`;
-    const username = normalizedEmail.split("@")[0];
-
     const user = await prisma.user.create({
       data: {
-        name: fullName,
-        username,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
         email: normalizedEmail,
         password: hashedPassword,
+
         emailVerified: false,
+
         verificationOtp,
         verificationOtpExpiresAt,
       },
+
       select: {
         id: true,
-        uid: true,
-        name: true,
-        username: true,
+        firstName: true,
+        lastName: true,
         email: true,
         emailVerified: true,
         createdAt: true,
       },
     });
 
-    // Send verification email.
+    /**
+     * Send verification email
+     */
     try {
       await sendEmail({
         to: normalizedEmail,
-        subject: "Verify Your Apex Signal Trade Account",
+        subject: "Verify Your Trust Signal Trade Account",
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-            <h2>Welcome to Apex Signal Trade</h2>
+            <h2>Welcome to Trust Signal Trade</h2>
 
-            <p>Hello ${trimmedFirstName},</p>
+            <p>Hello ${firstName.trim()},</p>
 
             <p>
-              Thank you for creating an Apex Signal Trade account.
+              Thank you for creating an Trust Signal Trade account.
               Please use the verification code below to verify your email address.
             </p>
 
@@ -152,8 +146,7 @@ const register = async (req, res) => {
             </div>
 
             <p>
-              This verification code will expire in
-              <strong>10 minutes</strong>.
+              This verification code will expire in <strong>10 minutes</strong>.
             </p>
 
             <p>
@@ -162,7 +155,7 @@ const register = async (req, res) => {
 
             <p>
               Regards,<br />
-              <strong>Apex Signal Trade</strong>
+              <strong>Trust Signal Trade</strong>
             </p>
           </div>
         `,
@@ -173,39 +166,28 @@ const register = async (req, res) => {
         emailError.message
       );
 
-      // The account has already been created.
-      // Registration remains successful, but the user may need
-      // to request another verification OTP.
+      /**
+       * The account has already been created.
+       * We don't fail registration because of an email delivery issue.
+       */
     }
 
     return res.status(201).json({
       success: true,
       message:
         "Registration successful. Please check your email for the verification OTP.",
-      user: {
-        ...user,
-        firstName: trimmedFirstName,
-        lastName: trimmedLastName,
-      },
+      user,
     });
   } catch (error) {
     console.error("Register error:", error);
 
-    // Handle a duplicate email safely if concurrent requests occur.
-    if (error.code === "P2002") {
-      return res.status(409).json({
-        success: false,
-        message: "An account with this email already exists",
-      });
-    }
-
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
     });
   }
 };
-
 
 /**
  * VERIFY EMAIL
@@ -215,7 +197,6 @@ const verifyEmail = async (req, res) => {
   try {
     const { email, otp } = req.body;
 
-    // Validate request
     if (!email || !otp) {
       return res.status(400).json({
         success: false,
@@ -224,9 +205,7 @@ const verifyEmail = async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const submittedOtp = String(otp).trim();
 
-    // Find user by email
     const user = await prisma.user.findUnique({
       where: {
         email: normalizedEmail,
@@ -240,7 +219,6 @@ const verifyEmail = async (req, res) => {
       });
     }
 
-    // Check whether email is already verified
     if (user.emailVerified) {
       return res.status(400).json({
         success: false,
@@ -248,45 +226,44 @@ const verifyEmail = async (req, res) => {
       });
     }
 
-    // Check whether OTP exists
     if (!user.verificationOtp) {
       return res.status(400).json({
         success: false,
-        message: "No verification OTP found. Please request a new OTP.",
+        message:
+          "No verification OTP found. Please request a new OTP.",
       });
     }
 
-    // Check OTP expiration
     if (
       !user.verificationOtpExpiresAt ||
-      new Date(user.verificationOtpExpiresAt) < new Date()
+      user.verificationOtpExpiresAt < new Date()
     ) {
       return res.status(400).json({
         success: false,
-        message: "Verification OTP has expired. Please request a new OTP.",
+        message: "Verification OTP has expired",
       });
     }
 
-    // Validate OTP
-    if (String(user.verificationOtp).trim() !== submittedOtp) {
+    if (user.verificationOtp !== otp) {
       return res.status(400).json({
         success: false,
         message: "Invalid verification OTP",
       });
     }
 
-    // Update verification status using fields from your Prisma schema
     const updatedUser = await prisma.user.update({
       where: {
         id: user.id,
       },
+
       data: {
         emailVerified: true,
         verified: true,
         verificationOtp: null,
         verificationOtpExpiresAt: null,
       },
-      select: {
+
+    select: {
         id: true,
         uid: true,
         name: true,
@@ -298,34 +275,39 @@ const verifyEmail = async (req, res) => {
       },
     });
 
-    // Send welcome email without failing verification if email delivery fails
+    /**
+     * Optional welcome email after successful verification
+     */
     try {
       await sendEmail({
         to: updatedUser.email,
         subject: "Welcome to Trust Signal Trade",
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-            <div>
-              <h2>Email Verified Successfully</h2>
+            <h2>Email Verified Successfully</h2>
 
-              <p>Hello ${updatedUser.name || updatedUser.username || "there"},</p>
+            <p>Hello ${updatedUser.firstName},</p>
 
-              <p>
-                Your Trust Signal Trade email address has been successfully verified.
-              </p>
+            <p>
+              Your Trust Signal Trade email address has been successfully verified.
+            </p>
 
-              <p>You can now log in and access your account.</p>
+            <p>
+              You can now log in and access your account.
+            </p>
 
-              <p>
-                Regards,<br />
-                <strong>Trust Signal Trade</strong>
-              </p>
-            </div>
+            <p>
+              Regards,<br />
+              <strong>Trust Signal Trade</strong>
+            </p>
           </div>
         `,
       });
     } catch (emailError) {
-      console.error("Welcome email failed:", emailError.message);
+      console.error(
+        "Welcome email failed:",
+        emailError.message
+      );
     }
 
     return res.status(200).json({
@@ -339,6 +321,7 @@ const verifyEmail = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -608,7 +591,7 @@ const forgotPassword = async (req, res) => {
             <p>Hello ${user.firstName},</p>
 
             <p>
-              We received a request to reset your Apex Signal Trade password.
+              We received a request to reset your Trust Signal Trade password.
             </p>
 
             <p>
