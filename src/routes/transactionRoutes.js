@@ -8,16 +8,16 @@ const {
 } = require("../controllers/transactionController");
 
 // Import your authentication middleware
-const { checkUser } = require("../middleware/auth");
+const { checkUser, verifyToken } = require("../middleware/auth");
 
 // ============================================
 // TRANSACTION ROUTES
 // ============================================
 
 // GET all transactions belonging to the authenticated user
-router.get("/", checkUser, getAllTransactions);
+router.get("/", verifyToken, checkUser, getAllTransactions);
 
 // GET a single transaction by ID
-router.get("/:id", checkUser, getTransactionById);
+router.get("/:id", verifyToken, checkUser, getTransactionById);
 
 module.exports = router;
