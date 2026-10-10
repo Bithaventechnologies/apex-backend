@@ -9,20 +9,21 @@ const {
 
 const {
   checkAdmin,
+   verifyToken,
 } = require("../../middleware/auth");
 
 const router = express.Router();
 
 // Get all plans
-router.get("/", checkAdmin, getAllPlans);
+router.get("/", checkAdmin,  verifyToken, getAllPlans);
 
 // Get single plan
-router.get("/:id", checkAdmin, getPlanById);
+router.get("/:id", checkAdmin,  verifyToken, getPlanById);
 
 // Create plan
-router.post("/", checkAdmin, createPlan);
+router.post("/", checkAdmin,  verifyToken, createPlan);
 
 // Delete plan
-router.delete("/:id", checkAdmin, deletePlan);
+router.delete("/:id", checkAdmin , verifyToken, deletePlan);
 
 module.exports = router;

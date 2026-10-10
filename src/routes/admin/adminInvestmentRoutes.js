@@ -10,22 +10,22 @@ const {
   endInvestment,
 } = require("../../controllers/Admin/AdminInvestmentController");
 
-const { checkAdmin } = require("../../middleware/auth");
+const { checkAdmin, verifyToken, } = require("../../middleware/auth");
 
 const router = express.Router();
 
-router.get("/all", checkAdmin, getAllInvestments);
+router.get("/all", checkAdmin,  verifyToken, getAllInvestments);
 
-router.get("/user/:uid", checkAdmin, getUserInvestments);
+router.get("/user/:uid", checkAdmin,  verifyToken, getUserInvestments);
 
-router.get("/:id", checkAdmin, getInvestmentById);
+router.get("/:id", checkAdmin,  verifyToken, getInvestmentById);
 
-router.patch("/:id/approve", checkAdmin, approveInvestment);
+router.patch("/:id/approve", checkAdmin,  verifyToken, approveInvestment);
 
-router.patch("/:id/processing", checkAdmin, processInvestment);
+router.patch("/:id/processing", checkAdmin,  verifyToken, processInvestment);
 
-router.patch("/:id/decline", checkAdmin, declineInvestment);
+router.patch("/:id/decline", checkAdmin,  verifyToken, declineInvestment);
 
-router.patch("/:id/end", checkAdmin, endInvestment);
+router.patch("/:id/end", checkAdmin,  verifyToken, endInvestment);
 
 module.exports = router;

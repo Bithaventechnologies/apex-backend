@@ -10,22 +10,26 @@ const {
   deleteWithdrawal,
 } = require("../../controllers/Admin/AdminWithdrawlController");
 
-const { checkAdmin } = require("../../middleware/auth");
+const {
+  verifyToken,
+  checkAdmin,
+} = require("../../middleware/auth");
 
 const router = express.Router();
 
-router.get("/all", checkAdmin, getAllWithdrawals);
+// All routes require a valid token and admin access
+router.get("/all", verifyToken, checkAdmin, getAllWithdrawals);
 
-router.get("/user/:uid", checkAdmin, getUserWithdrawals);
+router.get("/user/:uid", verifyToken, checkAdmin, getUserWithdrawals);
 
-router.get("/:id", checkAdmin, getWithdrawalById);
+router.get("/:id", verifyToken, checkAdmin, getWithdrawalById);
 
-router.patch("/:id/processing", checkAdmin, processWithdrawal);
+router.patch("/:id/processing", verifyToken, checkAdmin, processWithdrawal);
 
-router.patch("/:id/approve", checkAdmin, approveWithdrawal);
+router.patch("/:id/approve", verifyToken, checkAdmin, approveWithdrawal);
 
-router.patch("/:id/decline", checkAdmin, declineWithdrawal);
+router.patch("/:id/decline", verifyToken, checkAdmin, declineWithdrawal);
 
-router.delete("/:id", checkAdmin, deleteWithdrawal);
+router.delete("/:id", verifyToken, checkAdmin, deleteWithdrawal);
 
 module.exports = router;

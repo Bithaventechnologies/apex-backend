@@ -10,22 +10,22 @@ const {
   deleteEarning,
 } = require("../../controllers/Admin/AdminEarningController");
 
-const { checkAdmin } = require("../../middleware/auth");
+const { checkAdmin, verifyToken, } = require("../../middleware/auth");
 
 const router = express.Router();
 
-router.get("/all", checkAdmin, getAllEarnings);
+router.get("/all", checkAdmin, verifyToken, getAllEarnings);
 
-router.get("/user/:uid", checkAdmin, getUserEarnings);
+router.get("/user/:uid", checkAdmin, verifyToken, getUserEarnings);
 
-router.get("/total/:uid", checkAdmin, getTotalEarnings);
+router.get("/total/:uid", checkAdmin, verifyToken, getTotalEarnings);
 
-router.get("/:id", checkAdmin, getEarningById);
+router.get("/:id", checkAdmin, verifyToken, getEarningById);
 
-router.post("/:uid", checkAdmin, addEarning);
+router.post("/:uid", checkAdmin, verifyToken, addEarning);
 
-router.post("/deduct/:uid", checkAdmin, deductEarning);
+router.post("/deduct/:uid", checkAdmin, verifyToken, deductEarning);
 
-router.delete("/:id", checkAdmin, deleteEarning);
+router.delete("/:id", checkAdmin, verifyToken, deleteEarning);
 
 module.exports = router;
