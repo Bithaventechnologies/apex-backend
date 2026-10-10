@@ -44,14 +44,10 @@ const generateToken = (user) => {
  * REGISTER
  * POST /api/auth/register
  */
+
 const register = async (req, res) => {
   try {
-    const {
-      firstName,
-      lastName,
-      email,
-      password,
-    } = req.body;
+    const { firstName, lastName, email, password } = req.body;
 
     if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({
@@ -61,7 +57,7 @@ const register = async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
+    if (typeof password !== "string" || password.length < 8) {
       return res.status(400).json({
         success: false,
         message: "Password must be at least 8 characters",
@@ -69,6 +65,15 @@ const register = async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    const trimmedFirstName = firstName.trim();
+    const trimmedLastName = lastName.trim();
+
+    if (!trimmedFirstName || !trimmedLastName) {
+      return res.status(400).json({
+        success: false,
+        message: "First name and last name cannot be empty",
+      });
+    }
 
     const existingUser = await prisma.user.findUnique({
       where: {
@@ -88,32 +93,33 @@ const register = async (req, res) => {
     const verificationOtp = generateOtp();
     const verificationOtpExpiresAt = getOtpExpiry();
 
+    // Your Prisma schema uses `name` and `username`,
+    // not `firstName` and `lastName`.
+    const fullName = `${trimmedFirstName} ${trimmedLastName}`;
+    const username = normalizedEmail.split("@")[0];
+
     const user = await prisma.user.create({
       data: {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
+        name: fullName,
+        username,
         email: normalizedEmail,
         password: hashedPassword,
-
         emailVerified: false,
-
         verificationOtp,
         verificationOtpExpiresAt,
       },
-
       select: {
         id: true,
-        firstName: true,
-        lastName: true,
+        uid: true,
+        name: true,
+        username: true,
         email: true,
         emailVerified: true,
         createdAt: true,
       },
     });
 
-    /**
-     * Send verification email
-     */
+    // Send verification email.
     try {
       await sendEmail({
         to: normalizedEmail,
@@ -122,7 +128,7 @@ const register = async (req, res) => {
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
             <h2>Welcome to Apex Signal Trade</h2>
 
-            <p>Hello ${firstName.trim()},</p>
+            <p>Hello ${trimmedFirstName},</p>
 
             <p>
               Thank you for creating an Apex Signal Trade account.
@@ -146,7 +152,8 @@ const register = async (req, res) => {
             </div>
 
             <p>
-              This verification code will expire in <strong>10 minutes</strong>.
+              This verification code will expire in
+              <strong>10 minutes</strong>.
             </p>
 
             <p>
@@ -166,28 +173,39 @@ const register = async (req, res) => {
         emailError.message
       );
 
-      /**
-       * The account has already been created.
-       * We don't fail registration because of an email delivery issue.
-       */
+      // The account has already been created.
+      // Registration remains successful, but the user may need
+      // to request another verification OTP.
     }
 
     return res.status(201).json({
       success: true,
       message:
         "Registration successful. Please check your email for the verification OTP.",
-      user,
+      user: {
+        ...user,
+        firstName: trimmedFirstName,
+        lastName: trimmedLastName,
+      },
     });
   } catch (error) {
     console.error("Register error:", error);
 
+    // Handle a duplicate email safely if concurrent requests occur.
+    if (error.code === "P2002") {
+      return res.status(409).json({
+        success: false,
+        message: "An account with this email already exists",
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message,
     });
   }
 };
+
 
 /**
  * VERIFY EMAIL
