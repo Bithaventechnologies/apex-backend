@@ -9,6 +9,7 @@ const {
 
 const {
   checkAdmin,
+   verifyToken,
 } = require("../../middleware/auth");
 
 const router = express.Router();
@@ -21,6 +22,7 @@ const router = express.Router();
 router.get(
   "/",
   checkAdmin,
+   verifyToken,
   getAllUsers
 );
 
@@ -28,6 +30,7 @@ router.get(
 router.get(
   "/:uid",
   checkAdmin,
+   verifyToken,
   getUserByUid
 );
 
@@ -35,6 +38,7 @@ router.get(
 router.delete(
   "/:uid",
   checkAdmin,
+   verifyToken,
   deleteUser
 );
 

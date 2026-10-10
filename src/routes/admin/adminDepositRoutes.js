@@ -11,6 +11,7 @@ const {
 
 const {
   checkAdmin,
+   verifyToken,
 } = require("../../middleware/auth");
 
 const router = express.Router();
@@ -23,6 +24,7 @@ const router = express.Router();
 router.get(
   "/",
   checkAdmin,
+   verifyToken,
   getAllDeposits
 );
 
@@ -30,6 +32,7 @@ router.get(
 router.get(
   "/user/:uid",
   checkAdmin,
+   verifyToken,
   getUserDeposits
 );
 
@@ -44,6 +47,7 @@ router.patch(
 router.patch(
   "/:id/approve",
   checkAdmin,
+   verifyToken,
   approveDeposit
 );
 
@@ -51,6 +55,7 @@ router.patch(
 router.patch(
   "/:id/decline",
   checkAdmin,
+   verifyToken,
   declineDeposit
 );
 
