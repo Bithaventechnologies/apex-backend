@@ -18,33 +18,43 @@ const createPlan = async (req, res) => {
 
     // Validate required fields
     if (
-      !name ||
+      name === undefined ||
+      name === null ||
       returns === undefined ||
       returns === null ||
       minAmount === undefined ||
+      minAmount === null ||
       duration === undefined ||
-      maxAmount === undefined
+      duration === null ||
+      maxAmount === undefined ||
+      maxAmount === null
     ) {
       return res.status(400).json({
         message:
-          "Bad Request: name, returns, minAmount, duration, and maxAmount are required.",
+          "name, returns, minAmount, duration, and maxAmount are required.",
       });
     }
 
     const planName = String(name).trim();
     const returnValue = String(returns).trim();
+
     const minimum = Number(minAmount);
     const maximum = Number(maxAmount);
     const planDuration = Number(duration);
+    const numericReturns = Number(returnValue);
 
+    // Validate the values before saving them as strings
     if (
       !planName ||
       !returnValue ||
+      !Number.isFinite(numericReturns) ||
       !Number.isFinite(minimum) ||
       !Number.isFinite(maximum) ||
       !Number.isFinite(planDuration) ||
-      minimum < 0 ||
+      numericReturns <= 0 ||
+      minimum <= 0 ||
       maximum < minimum ||
+      !Number.isInteger(planDuration) ||
       planDuration <= 0
     ) {
       return res.status(400).json({
@@ -52,7 +62,7 @@ const createPlan = async (req, res) => {
       });
     }
 
-    // Optional duplicate check
+    // Check for duplicate plan names
     const existingPlan = await prisma.plan.findFirst({
       where: {
         name: planName,
@@ -65,40 +75,36 @@ const createPlan = async (req, res) => {
       });
     }
 
-    // Create plan
+    // Create the plan.
+    // These fields are strings in the current Prisma schema.
     const plan = await prisma.plan.create({
       data: {
         name: planName,
-
-        // Prisma schema expects String
         returns: returnValue,
-
-        minAmount: minimum,
-        duration: planDuration,
-        maxAmount: maximum,
+        minAmount: String(minAmount).trim(),
+        duration: String(duration).trim(),
+        maxAmount: String(maxAmount).trim(),
         uid: uid ? String(uid) : "",
       },
     });
 
-    const data = {
-      id: plan.id,
-      name: plan.name,
-      returns: plan.returns,
-      minAmount: plan.minAmount,
-      duration: plan.duration,
-      maxAmount: plan.maxAmount,
-      uid: plan.uid || "",
-      createdAt: plan.createdAt
-        ? plan.createdAt.getTime()
-        : null,
-      updatedAt: plan.updatedAt
-        ? plan.updatedAt.getTime()
-        : null,
-    };
-
     return res.status(201).json({
       message: "success",
-      data,
+      data: {
+        id: plan.id,
+        name: plan.name,
+        returns: plan.returns,
+        minAmount: plan.minAmount,
+        duration: plan.duration,
+        maxAmount: plan.maxAmount,
+        uid: plan.uid || "",
+        createdAt: plan.createdAt
+          ? plan.createdAt.getTime()
+          : null,
+        updatedAt: plan.updatedAt
+          ? plan.updatedAt.getTime()
+          : null,
+      },
     });
   } catch (error) {
     console.error("Create plan error:", error);
@@ -179,25 +185,23 @@ const getPlanById = async (req, res) => {
       });
     }
 
-    const data = {
-      id: plan.id,
-      name: plan.name,
-      returns: plan.returns,
-      minAmount: plan.minAmount,
-      duration: plan.duration,
-      maxAmount: plan.maxAmount,
-      uid: plan.uid || "",
-      createdAt: plan.createdAt
-        ? plan.createdAt.getTime()
-        : null,
-      updatedAt: plan.updatedAt
-        ? plan.updatedAt.getTime()
-        : null,
-    };
-
     return res.status(200).json({
       message: "success",
-      data,
+      data: {
+        id: plan.id,
+        name: plan.name,
+        returns: plan.returns,
+        minAmount: plan.minAmount,
+        duration: plan.duration,
+        maxAmount: plan.maxAmount,
+        uid: plan.uid || "",
+        createdAt: plan.createdAt
+          ? plan.createdAt.getTime()
+          : null,
+        updatedAt: plan.updatedAt
+          ? plan.updatedAt.getTime()
+          : null,
+      },
     });
   } catch (error) {
     console.error("Get plan by ID error:", error);
