@@ -152,33 +152,42 @@ const getInvestmentById = async (req, res) => {
 // POST /api/investments
 // =====================================================
 
+
+// =====================================================
+// CREATE INVESTMENT
+// POST /api/investments
+// Deducts ONLY from user.balance
+// =====================================================
+
 const createInvestment = async (req, res) => {
   try {
     const userId = req.user.id;
+    const { plan_id, amount, method } = req.body;
 
-    const {
-      plan_id,
-      amount,
-      method,
-    } = req.body;
+    const amountNumber = Number(amount);
 
-    const amountNumber = parseFloat(amount);
-
-    // =====================================================
     // VALIDATION
-    // =====================================================
-
-    if (!plan_id || !amountNumber || amountNumber <= 0 || !method) {
+    if (
+      !plan_id ||
+      amount === undefined ||
+      amount === null ||
+      amount === "" ||
+      !Number.isFinite(amountNumber) ||
+      amountNumber <= 0
+    ) {
       return res.status(400).json({
-        message:
-          "Bad Request `plan_id`, `amount`, and `method` are required.",
+        message: "A valid plan_id and investment amount are required.",
       });
     }
 
-    // =====================================================
-    // FIND USER
-    // =====================================================
+    // The investment must use the main account balance.
+    if (method !== "BALANCE") {
+      return res.status(400).json({
+        message: "Invalid payment method. Use your main account balance.",
+      });
+    }
 
+    // FIND USER
     const user = await prisma.user.findUnique({
       where: {
         id: userId,
@@ -191,10 +200,7 @@ const createInvestment = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // FIND INVESTMENT PLAN
-    // =====================================================
-
+    // FIND PLAN
     const planId = parseInt(plan_id, 10);
 
     if (Number.isNaN(planId)) {
@@ -215,174 +221,103 @@ const createInvestment = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // VALIDATE METHOD
-    // =====================================================
+    // VALIDATE PLAN AMOUNT
+    const minimum = Number(investmentPlan.minAmount);
 
-    const validMethods = ["BTC", "ETH", "SOL", "USDT"];
+    const maximum =
+      investmentPlan.maxAmount === null ||
+      investmentPlan.maxAmount === undefined ||
+      investmentPlan.maxAmount === ""
+        ? null
+        : Number(investmentPlan.maxAmount);
 
-    if (!validMethods.includes(method)) {
+    if (amountNumber < minimum) {
       return res.status(400).json({
-        message:
-          "Invalid investment method. Allowed methods are BTC, ETH, SOL, and USDT.",
+        message: `The minimum investment for ${investmentPlan.name} is ${minimum}.`,
       });
     }
 
-    // =====================================================
-    // CHECK MAIN BALANCE
-    // =====================================================
-
-    if (user.balance < amountNumber) {
-      return res.status(406).json({
-        message: "User does not have sufficient balance.",
+    if (maximum !== null && amountNumber > maximum) {
+      return res.status(400).json({
+        message: `The maximum investment for ${investmentPlan.name} is ${maximum}.`,
       });
     }
 
-    // =====================================================
-    // ATOMIC INVESTMENT TRANSACTION
-    // =====================================================
-
+    // ATOMIC TRANSACTION
     const result = await prisma.$transaction(async (tx) => {
-      // ---------------------------------------------------
-      // Re-fetch user inside transaction
-      // ---------------------------------------------------
-
-      const currentUser = await tx.user.findUnique({
+      /*
+       * Only update the main balance.
+       *
+       * updateMany with a balance condition prevents a concurrent
+       * request from deducting funds if the balance is no longer
+       * sufficient.
+       *
+       * Crypto balances are deliberately NOT updated.
+       */
+      const deduction = await tx.user.updateMany({
         where: {
           id: userId,
+          balance: {
+            gte: amountNumber,
+          },
+        },
+        data: {
+          balance: {
+            decrement: amountNumber,
+          },
         },
       });
 
-      if (!currentUser) {
-        throw new Error("User does not exist.");
-      }
-
-      // ---------------------------------------------------
-      // Check main balance again
-      // ---------------------------------------------------
-
-      if (currentUser.balance < amountNumber) {
+      if (deduction.count !== 1) {
         throw new Error("INSUFFICIENT_MAIN_BALANCE");
       }
 
-      // ---------------------------------------------------
-      // Check and deduct crypto balance
-      // ---------------------------------------------------
-
-      const updateData = {
-        balance: {
-          decrement: amountNumber,
-        },
-      };
-
-      switch (method) {
-        case "BTC":
-          if (currentUser.btcBal < amountNumber) {
-            throw new Error("INSUFFICIENT_BTC_BALANCE");
-          }
-
-          updateData.btcBal = {
-            decrement: amountNumber,
-          };
-          break;
-
-        case "ETH":
-          if (currentUser.ethBal < amountNumber) {
-            throw new Error("INSUFFICIENT_ETH_BALANCE");
-          }
-
-          updateData.ethBal = {
-            decrement: amountNumber,
-          };
-          break;
-
-        case "SOL":
-          if (currentUser.solBal < amountNumber) {
-            throw new Error("INSUFFICIENT_SOL_BALANCE");
-          }
-
-          updateData.solBal = {
-            decrement: amountNumber,
-          };
-          break;
-
-        case "USDT":
-          if (currentUser.usdtBal < amountNumber) {
-            throw new Error("INSUFFICIENT_USDT_BALANCE");
-          }
-
-          updateData.usdtBal = {
-            decrement: amountNumber,
-          };
-          break;
-      }
-
-      // ---------------------------------------------------
-      // Update user balances
-      // ---------------------------------------------------
-
-      const updatedUser = await tx.user.update({
+      const updatedUser = await tx.user.findUnique({
         where: {
           id: userId,
         },
-        data: updateData,
       });
 
-      // ---------------------------------------------------
-      // Create investment
-      // ---------------------------------------------------
+      if (!updatedUser) {
+        throw new Error("USER_NOT_FOUND");
+      }
 
+      // CREATE INVESTMENT
       const investment = await tx.investment.create({
         data: {
-          uid: currentUser.uid,
-
-          name: currentUser.name,
-          email: currentUser.email,
+          uid: updatedUser.uid,
+          name: updatedUser.name,
+          email: updatedUser.email,
 
           plan_id: investmentPlan.id.toString(),
           plan_name: investmentPlan.name,
 
-          method,
-
+          method: "BALANCE",
           duration: investmentPlan.duration,
-
           amount: amountNumber,
-
-          // Your Plan.returns is String while Investment.returns is Float
           returns: parseFloat(investmentPlan.returns) || 0,
 
           active: false,
-
           creditedAmount: 0,
-
           status: "pending",
         },
       });
 
-      // ---------------------------------------------------
-      // Create transaction
-      // ---------------------------------------------------
-
+      // CREATE TRANSACTION HISTORY
       const transaction = await tx.transaction.create({
         data: {
-          uid: currentUser.uid,
-
+          uid: updatedUser.uid,
           amount: amountNumber,
 
-          from: currentUser.uid,
-
+          from: updatedUser.uid,
           to: "admin",
 
           method: "transfer",
-
           status: "pending",
-
           type: "investment",
 
           investment_id: investment.id.toString(),
-
           plan_id: investmentPlan.id.toString(),
-
           plan_name: investmentPlan.name,
         },
       });
@@ -394,16 +329,9 @@ const createInvestment = async (req, res) => {
       };
     });
 
-    const {
-      investment,
-      transaction,
-      updatedUser,
-    } = result;
+    const { investment, transaction, updatedUser } = result;
 
-    // =====================================================
     // SEND EMAIL
-    // =====================================================
-
     try {
       const firstName =
         user.name && user.name.trim()
@@ -414,224 +342,109 @@ const createInvestment = async (req, res) => {
         to: user.email,
         subject: "Investment",
         html: `
+          <!DOCTYPE html>
           <html lang="en">
             <head>
               <meta charset="UTF-8" />
-
-              <meta
-                name="viewport"
-                content="width=device-width, initial-scale=1.0"
-              />
-
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
               <title>Investment Notification</title>
-
-              <style>
-                body {
-                  font-family: Arial, sans-serif;
-                  background-color: #191c24;
-                  margin: 0;
-                  padding: 20px;
-                }
-
-                .container {
-                  max-width: 600px;
-                  margin: 0 auto;
-                  background-color: #ffffff;
-                  border-radius: 8px;
-                  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-                  padding: 20px;
-                }
-
-                h2 {
-                  color: #0056b3;
-                  margin-top: 0;
-                }
-
-                p {
-                  color: #333333;
-                  line-height: 1.6;
-                }
-
-                table {
-                  width: 100%;
-                  border-collapse: collapse;
-                  margin-top: 20px;
-                }
-
-                th,
-                td {
-                  padding: 10px;
-                  text-align: left;
-                  border-bottom: 1px solid #dddddd;
-                  text-transform: capitalize;
-                }
-
-                th {
-                  background-color: #f2f2f2;
-                }
-
-                tr:last-child td {
-                  border-bottom: none;
-                }
-
-                .footer {
-                  margin-top: 20px;
-                  text-align: center;
-                  color: #666666;
-                }
-              </style>
             </head>
-
-            <body>
-              <div class="container">
-                <h2>Investment Notification</h2>
+            <body style="font-family: Arial, sans-serif; background:#f4f4f4; padding:20px;">
+              <div style="max-width:600px; margin:auto; background:#fff; border-radius:8px; padding:24px;">
+                <h2 style="color:#25166B;">Investment Notification</h2>
 
                 <p>Hello ${firstName},</p>
 
-                <p>
-                  We would like to inform you about the recent investment
-                  transaction made on your account.
-                </p>
+                <p>Your investment request has been submitted successfully.</p>
 
-                <h3>Transaction Details:</h3>
-
-                <table>
+                <table style="width:100%; border-collapse:collapse;">
                   <tr>
-                    <th>Investment ID:</th>
-                    <td>${investment.id}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">Investment ID</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${investment.id}</td>
                   </tr>
-
                   <tr>
-                    <th>Plan Name:</th>
-                    <td>${investment.plan_name.toUpperCase()}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">Plan</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${investment.plan_name}</td>
                   </tr>
-
                   <tr>
-                    <th>Amount Invested:</th>
-                    <td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">Amount</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">
                       ${investment.amount.toLocaleString("en-US", {
                         style: "currency",
                         currency: "USD",
                       })}
                     </td>
                   </tr>
-
                   <tr>
-                    <th>Duration:</th>
-                    <td>${investment.duration}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">Payment source</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">Main account balance</td>
                   </tr>
-
                   <tr>
-                    <th>Status:</th>
-                    <td>${investment.status.toUpperCase()}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">Duration</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${investment.duration} days</td>
                   </tr>
-
                   <tr>
-                    <th>Transaction Date:</th>
-                    <td>
-                      ${new Date(
-                        investment.createdAt
-                      ).toLocaleDateString("en-GB")}
-                    </td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">Status</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${investment.status.toUpperCase()}</td>
                   </tr>
                 </table>
 
-                <p>
-                  If you have any questions or concerns, feel free to contact
-                  our support team.
-                </p>
+                <p>If you have any questions, please contact our support team.</p>
 
-                <div class="footer">
-                  <p>
-                    Best regards,<br />
-                    Apex Signal Trade
-                  </p>
-                </div>
+                <p>Best regards,<br />Apex Signal Trade</p>
               </div>
             </body>
           </html>
         `,
       });
     } catch (emailError) {
-      // Email failure should not undo a successful investment
-      console.error(
-        "Investment email failed:",
-        emailError.message
-      );
+      // Email failure must not undo a completed database transaction.
+      console.error("Investment email failed:", emailError.message);
     }
 
-    // =====================================================
     // RESPONSE
-    // =====================================================
-
-    const data = {
-      id: investment.id,
-      uid: investment.uid,
-
-      plan_id: investment.plan_id,
-      plan_name: investment.plan_name,
-
-      method: investment.method,
-
-      amount: investment.amount,
-
-      returns: investment.returns,
-
-      duration: investment.duration,
-
-      status: investment.status,
-
-      active: investment.active,
-
-      creditedAmount: investment.creditedAmount,
-
-      lastCreditedAt: investment.lastCreditedAt
-        ? investment.lastCreditedAt.getTime()
-        : null,
-
-      transaction_id: transaction.id.toString(),
-
-      createdAt: investment.createdAt.getTime(),
-      updatedAt: investment.updatedAt.getTime(),
-
-      balance: updatedUser.balance,
-    };
-
-    return res.status(200).json({
+    return res.status(201).json({
       message: "success",
-      data,
+      data: {
+        id: investment.id,
+        uid: investment.uid,
+
+        plan_id: investment.plan_id,
+        plan_name: investment.plan_name,
+
+        method: investment.method,
+        amount: investment.amount,
+        returns: investment.returns,
+        duration: investment.duration,
+
+        status: investment.status,
+        active: investment.active,
+        creditedAmount: investment.creditedAmount,
+
+        lastCreditedAt: investment.lastCreditedAt
+          ? investment.lastCreditedAt.getTime()
+          : null,
+
+        transaction_id: transaction.id.toString(),
+
+        createdAt: investment.createdAt.getTime(),
+        updatedAt: investment.updatedAt.getTime(),
+
+        balance: updatedUser.balance,
+      },
     });
   } catch (error) {
     console.error("Create investment error:", error);
 
-    // Handle specific balance errors
     if (error.message === "INSUFFICIENT_MAIN_BALANCE") {
-      return res.status(406).json({
-        message: "User does not have sufficient balance.",
+      return res.status(400).json({
+        message: "You do not have sufficient main account balance.",
       });
     }
 
-    if (error.message === "INSUFFICIENT_BTC_BALANCE") {
-      return res.status(406).json({
-        message: "User does not have sufficient BTC balance.",
-      });
-    }
-
-    if (error.message === "INSUFFICIENT_ETH_BALANCE") {
-      return res.status(406).json({
-        message: "User does not have sufficient ETH balance.",
-      });
-    }
-
-    if (error.message === "INSUFFICIENT_SOL_BALANCE") {
-      return res.status(406).json({
-        message: "User does not have sufficient SOL balance.",
-      });
-    }
-
-    if (error.message === "INSUFFICIENT_USDT_BALANCE") {
-      return res.status(406).json({
-        message: "User does not have sufficient USDT balance.",
+    if (error.message === "USER_NOT_FOUND") {
+      return res.status(404).json({
+        message: "User does not exist.",
       });
     }
 
