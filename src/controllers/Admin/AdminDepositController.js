@@ -170,22 +170,22 @@ const processDeposit = async (req, res) => {
 // ============================================
 // APPROVE DEPOSIT
 // ============================================
+
 const approveDeposit = async (req, res) => {
   try {
     const { id } = req.params;
+    const depositId = Number(id);
 
-    const depositId = parseInt(id, 10);
-
-    if (Number.isNaN(depositId)) {
+    // Validate deposit ID
+    if (!Number.isInteger(depositId) || depositId <= 0) {
       return res.status(400).json({
         message: "Invalid deposit ID.",
       });
     }
 
+    // Find the deposit
     const deposit = await prisma.deposit.findUnique({
-      where: {
-        id: depositId,
-      },
+      where: { id: depositId },
     });
 
     if (!deposit) {
@@ -194,119 +194,115 @@ const approveDeposit = async (req, res) => {
       });
     }
 
-    const user = await prisma.user.findFirst({
-      where: {
-        uid: deposit.uid,
-      },
+    // Prevent approving an already approved deposit
+    if (deposit.status === "approved") {
+      return res.status(400).json({
+        message: "This deposit has already been approved.",
+      });
+    }
+
+    // Find the user using deposit.uid as the numeric User.id
+    // Example: deposit.uid = "1" -> user.id = 1
+    const userId = Number(deposit.uid);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        message: "The deposit does not contain a valid user ID.",
+        depositUid: deposit.uid,
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
     });
 
     if (!user) {
       return res.status(404).json({
         message: "User not found.",
+        depositUid: deposit.uid,
       });
     }
 
-    const transactionId = parseInt(
-      deposit.transaction_id,
-      10
-    );
+    const amount = Number(deposit.amount);
 
-    const result = await prisma.$transaction(
-      async (tx) => {
-        const updatedUser =
-          await tx.user.update({
-            where: {
-              id: user.id,
-            },
-            data: {
-              balance:
-                Number(user.balance || 0) +
-                Number(deposit.amount),
-            },
-          });
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        message: "Invalid deposit amount.",
+      });
+    }
 
-        const updatedDeposit =
-          await tx.deposit.update({
-            where: {
-              id: depositId,
-            },
-            data: {
-              status: "approved",
-            },
-          });
+    // Update the balance and deposit status atomically
+    const result = await prisma.$transaction(async (tx) => {
+      const currentUser = await tx.user.findUnique({
+        where: { id: userId },
+      });
 
-        let updatedTransaction = null;
-
-        if (!Number.isNaN(transactionId)) {
-          updatedTransaction =
-            await tx.transaction.update({
-              where: {
-                id: transactionId,
-              },
-              data: {
-                status: "approved",
-              },
-            });
-        }
-
-        return {
-          updatedUser,
-          updatedDeposit,
-          updatedTransaction,
-        };
+      if (!currentUser) {
+        throw new Error("User not found during deposit approval.");
       }
-    );
 
-    // ========================================
-    // EMAIL USER
-    // ========================================
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: {
+          balance: Number(currentUser.balance || 0) + amount,
+        },
+      });
+
+      const updatedDeposit = await tx.deposit.update({
+        where: { id: depositId },
+        data: {
+          status: "approved",
+        },
+      });
+
+      let updatedTransaction = null;
+
+      const transactionId = Number(deposit.transaction_id);
+
+      if (Number.isInteger(transactionId) && transactionId > 0) {
+        updatedTransaction = await tx.transaction.updateMany({
+          where: {
+            id: transactionId,
+          },
+          data: {
+            status: "approved",
+          },
+        });
+      }
+
+      return {
+        updatedUser,
+        updatedDeposit,
+        updatedTransaction,
+      };
+    });
+
+    // Send approval email
     try {
       await sendEmail({
         to: user.email,
-        subject: "Deposit Approved - PatchPay",
+        subject: "Deposit Approved",
         html: `
-          <h2>Deposit Approved</h2>
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; color: #222;">
+            <h2>Deposit Approved Successfully</h2>
 
-          <p>Hello ${user.name || "there"},</p>
+            <p>Hello ${user.name || "there"},</p>
 
-          <p>
-            Your deposit has been approved successfully.
-          </p>
+            <p>
+              Your deposit has been approved and your account balance has been updated.
+            </p>
 
-          <p>
-            <strong>Amount:</strong>
-            $${Number(deposit.amount).toLocaleString(
-              "en-US",
-              {
-                minimumFractionDigits: 2,
-              }
-            )}
-          </p>
+            <div style="background: #f5f5f5; padding: 16px; border-radius: 8px;">
+              <p><strong>Deposit ID:</strong> ${deposit.id}</p>
+              <p><strong>Amount:</strong> ${amount}</p>
+              <p><strong>Payment Method:</strong> ${deposit.method}</p>
+              <p><strong>Transaction ID:</strong> ${deposit.transaction_id}</p>
+              <p><strong>Status:</strong> Approved</p>
+              <p><strong>Updated Balance:</strong> ${result.updatedUser.balance}</p>
+            </div>
 
-          <p>
-            <strong>Transaction ID:</strong>
-            ${deposit.transaction_id}
-          </p>
-
-          <p>
-            <strong>Status:</strong>
-            Approved
-          </p>
-
-          <p>
-            Your updated balance is
-            <strong>
-              $${Number(
-                result.updatedUser.balance
-              ).toLocaleString("en-US", {
-                minimumFractionDigits: 2,
-              })}
-            </strong>.
-          </p>
-
-          <p>
-            Thank you for using PatchPay.
-          </p>
+            <p>Thank you for using our platform.</p>
+          </div>
         `,
       });
     } catch (emailError) {
@@ -319,16 +315,21 @@ const approveDeposit = async (req, res) => {
     return res.status(200).json({
       message: "Deposit approved successfully.",
       data: result.updatedDeposit,
+      user: {
+        id: result.updatedUser.id,
+        balance: result.updatedUser.balance,
+      },
     });
   } catch (error) {
     console.error("Approve deposit error:", error);
 
     return res.status(500).json({
-      message: "Internal server error",
+      message: "Internal server error.",
       error: error.message,
     });
   }
 };
+
 
 // ============================================
 // DECLINE DEPOSIT
