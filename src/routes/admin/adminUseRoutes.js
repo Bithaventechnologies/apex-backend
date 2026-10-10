@@ -1,4 +1,3 @@
-
 const express = require("express");
 
 const {
@@ -9,38 +8,18 @@ const {
 
 const {
   checkAdmin,
-   verifyToken,
+  verifyToken,
 } = require("../../middleware/auth");
 
 const router = express.Router();
 
-// ============================================
-// ADMIN USERS
-// ============================================
-
 // GET /api/admin/users
-router.get(
-  "/",
-  checkAdmin,
-   verifyToken,
-  getAllUsers
-);
+router.get("/", verifyToken, checkAdmin, getAllUsers);
 
 // GET /api/admin/users/:uid
-router.get(
-  "/:uid",
-  checkAdmin,
-   verifyToken,
-  getUserByUid
-);
+router.get("/:uid", verifyToken, checkAdmin, getUserByUid);
 
 // DELETE /api/admin/users/:uid
-router.delete(
-  "/:uid",
-  checkAdmin,
-   verifyToken,
-  deleteUser
-);
+router.delete("/:uid", verifyToken, checkAdmin, deleteUser);
 
 module.exports = router;
-

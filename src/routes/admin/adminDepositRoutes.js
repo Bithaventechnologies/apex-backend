@@ -1,4 +1,3 @@
-
 const express = require("express");
 
 const {
@@ -11,53 +10,24 @@ const {
 
 const {
   checkAdmin,
-   verifyToken,
+  verifyToken,
 } = require("../../middleware/auth");
 
 const router = express.Router();
 
-// ============================================
-// ADMIN DEPOSITS
-// ============================================
-
 // GET /api/admin/deposits
-router.get(
-  "/",
-  checkAdmin,
-   verifyToken,
-  getAllDeposits
-);
+router.get("/", verifyToken, checkAdmin, getAllDeposits);
 
 // GET /api/admin/deposits/user/:uid
-router.get(
-  "/user/:uid",
-  checkAdmin,
-   verifyToken,
-  getUserDeposits
-);
+router.get("/user/:uid", verifyToken, checkAdmin, getUserDeposits);
 
 // PATCH /api/admin/deposits/:id/processing
-router.patch(
-  "/:id/processing",
-  checkAdmin,
-  processDeposit
-);
+router.patch("/:id/processing", verifyToken, checkAdmin, processDeposit);
 
 // PATCH /api/admin/deposits/:id/approve
-router.patch(
-  "/:id/approve",
-  checkAdmin,
-   verifyToken,
-  approveDeposit
-);
+router.patch("/:id/approve", verifyToken, checkAdmin, approveDeposit);
 
 // PATCH /api/admin/deposits/:id/decline
-router.patch(
-  "/:id/decline",
-  checkAdmin,
-   verifyToken,
-  declineDeposit
-);
+router.patch("/:id/decline", verifyToken, checkAdmin, declineDeposit);
 
 module.exports = router;
-
