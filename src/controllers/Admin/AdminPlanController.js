@@ -1,3 +1,4 @@
+
 const prisma = require("../../lib/prisma");
 
 // ==========================================
@@ -19,20 +20,42 @@ const createPlan = async (req, res) => {
     if (
       !name ||
       returns === undefined ||
+      returns === null ||
       minAmount === undefined ||
       duration === undefined ||
       maxAmount === undefined
     ) {
       return res.status(400).json({
         message:
-          "Bad Request: `name`, `returns`, `minAmount`, `duration`, and `maxAmount` are required.",
+          "Bad Request: name, returns, minAmount, duration, and maxAmount are required.",
+      });
+    }
+
+    const planName = String(name).trim();
+    const returnValue = String(returns).trim();
+    const minimum = Number(minAmount);
+    const maximum = Number(maxAmount);
+    const planDuration = Number(duration);
+
+    if (
+      !planName ||
+      !returnValue ||
+      !Number.isFinite(minimum) ||
+      !Number.isFinite(maximum) ||
+      !Number.isFinite(planDuration) ||
+      minimum < 0 ||
+      maximum < minimum ||
+      planDuration <= 0
+    ) {
+      return res.status(400).json({
+        message: "Please provide valid plan details.",
       });
     }
 
     // Optional duplicate check
     const existingPlan = await prisma.plan.findFirst({
       where: {
-        name,
+        name: planName,
       },
     });
 
@@ -45,12 +68,15 @@ const createPlan = async (req, res) => {
     // Create plan
     const plan = await prisma.plan.create({
       data: {
-        name,
-        returns: Number(returns),
-        minAmount: Number(minAmount),
-        duration: Number(duration),
-        maxAmount: Number(maxAmount),
-        uid: uid || "",
+        name: planName,
+
+        // Prisma schema expects String
+        returns: returnValue,
+
+        minAmount: minimum,
+        duration: planDuration,
+        maxAmount: maximum,
+        uid: uid ? String(uid) : "",
       },
     });
 
@@ -70,7 +96,7 @@ const createPlan = async (req, res) => {
         : null,
     };
 
-    return res.status(200).json({
+    return res.status(201).json({
       message: "success",
       data,
     });
@@ -114,6 +140,7 @@ const getAllPlans = async (req, res) => {
 
     return res.status(200).json({
       message: "success",
+      count: data.length,
       data,
     });
   } catch (error) {
@@ -132,13 +159,11 @@ const getAllPlans = async (req, res) => {
 // ==========================================
 const getPlanById = async (req, res) => {
   try {
-    const { id } = req.params;
+    const planId = Number(req.params.id);
 
-    const planId = Number(id);
-
-    if (!Number.isInteger(planId)) {
-      return res.status(406).json({
-        message: "Invalid plan id.",
+    if (!Number.isInteger(planId) || planId <= 0) {
+      return res.status(400).json({
+        message: "Invalid plan ID.",
       });
     }
 
@@ -190,13 +215,11 @@ const getPlanById = async (req, res) => {
 // ==========================================
 const deletePlan = async (req, res) => {
   try {
-    const { id } = req.params;
+    const planId = Number(req.params.id);
 
-    const planId = Number(id);
-
-    if (!Number.isInteger(planId)) {
-      return res.status(406).json({
-        message: "Invalid plan id.",
+    if (!Number.isInteger(planId) || planId <= 0) {
+      return res.status(400).json({
+        message: "Invalid plan ID.",
       });
     }
 
@@ -220,6 +243,7 @@ const deletePlan = async (req, res) => {
 
     return res.status(200).json({
       message: "success",
+      message_detail: "Plan deleted successfully.",
     });
   } catch (error) {
     console.error("Delete plan error:", error);
