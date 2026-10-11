@@ -29,4 +29,11 @@ router.get(
   getPlanById
 );
 
+//get all plans everyone
+
+router.get(
+  "/all",
+  getAllPlans
+)
+
 module.exports = router;
