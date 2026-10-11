@@ -19,6 +19,9 @@ const adminInvestmentRoutes = require("./routes/admin/adminInvestmentRoutes")
 const adminPlanRoutes = require("./routes/admin/adminPlanRoutes")
 const adminAuthRoutes = require("./routes/admin/adminAuthRoutes")
 
+
+const depositgateway = require("./routes/depositgatewayRoutes")
+
 const app = express();
 
 const PORT = process.env.PORT || 5000;
@@ -60,7 +63,9 @@ app.use('/api/admin/withdrawals', adminWithdrawalRoutes)
 app.use('/api/admin/earnings', adminEarningRoutes)
 app.use('/api/admin/investments', adminInvestmentRoutes)
 app.use('/api/admin/plans', adminPlanRoutes)
-app.use("/api/admin/auth" , adminAuthRoutes)
+app.use("/api/admin/auth" , adminAuthRoutes);
+
+app.use('/api/gateway', depositgateway)
 
 // Start server
 app.listen(PORT, () => {

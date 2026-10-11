@@ -275,11 +275,36 @@ model Deposit {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  gatewayId Int?
+gateway   DepositGateway? @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+
   @@index([uid])
   @@index([status])
   @@index([transaction_id])
   @@map("deposits")
 }
+
+
+
+model DepositGateway {
+  id           Int       @id @default(autoincrement())
+  name         String
+  currency     String
+  network      String
+  address      String
+  qrCode       String?
+  instructions String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  deposits     Deposit[]
+
+  @@index([currency])
+  @@index([isActive])
+  @@map("deposit_gateways")
+}
+
 
 
 // =====================================================
