@@ -1,7 +1,6 @@
 
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
-
 const prisma = require("../lib/prisma");
 const { jwtSign } = require("../services/jwtService");
 const { sendEmail } = require("../services/emailService");
@@ -9,34 +8,55 @@ const { sendEmail } = require("../services/emailService");
 const APP_NAME = "Trust Signal Trade";
 const OTP_EXPIRY_MINUTES = 10;
 
+/**
+ * Send email without making the API request wait for SMTP.
+ * Failures are logged instead of causing the API request to fail.
+ */
+const sendEmailInBackground = (emailTask, label) => {
+  setImmediate(() => {
+    Promise.resolve()
+      .then(emailTask)
+      .then(() => {
+        console.log(`${label} sent successfully.`);
+      })
+      .catch((error) => {
+        console.error(
+          `${label} failed:`,
+          error?.message || error
+        );
+      });
+  });
+};
+
+/**
+ * Helpers
+ */
 const generateOtp = () => {
   return crypto.randomInt(100000, 1000000).toString();
 };
 
 const getOtpExpiry = () => {
-  return new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+  return new Date(
+    Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000
+  );
 };
 
 const normalizeEmail = (email) => {
-  return typeof email === "string" ? email.trim().toLowerCase() : "";
+  return String(email || "").trim().toLowerCase();
 };
 
 const escapeHtml = (value = "") => {
-  return String(value).replace(/[&<>"']/g, (character) => {
-    const entities = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    };
-
-    return entities[character];
-  });
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 };
 
 const getFirstName = (user) => {
-  return user?.name?.trim().split(/\s+/)[0] || "there";
+  const name = String(user?.name || "").trim();
+  return name.split(/\s+/)[0] || "there";
 };
 
 const generateToken = (user) => {
@@ -59,23 +79,21 @@ const generateToken = (user) => {
   });
 };
 
-const sendVerificationEmail = async (email, firstName, otp) => {
-  await sendEmail({
+/**
+ * Email templates
+ */
+const sendVerificationEmail = (email, firstName, otp) => {
+  return sendEmail({
     to: email,
-    subject: `Verify Your ${APP_NAME} Account`,
+    subject: `Verify your email - ${APP_NAME}`,
     html: `
-      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#222">
-        <h2>Welcome to ${APP_NAME}</h2>
+      <div style="font-family:Arial,sans-serif;line-height:1.7;color:#222">
+        <h2>Verify Your Email Address</h2>
         <p>Hello ${escapeHtml(firstName)},</p>
-        <p>Thank you for creating an account. Use the verification code below
-        to verify your email address.</p>
-        <div style="margin:25px 0;padding:20px;background:#f4f4f4;
-          text-align:center;border-radius:8px">
-          <h1 style="letter-spacing:8px;margin:0;font-size:32px">
-            ${otp}
-          </h1>
-        </div>
-        <p>This code expires in <strong>10 minutes</strong>.</p>
+        <p>Thank you for registering with ${APP_NAME}.</p>
+        <p>Use the verification code below to verify your email address:</p>
+        <h1 style="letter-spacing:8px;color:#25166B">${escapeHtml(otp)}</h1>
+        <p>This code expires in ${OTP_EXPIRY_MINUTES} minutes.</p>
         <p>If you did not create this account, you can ignore this email.</p>
         <p>Regards,<br/><strong>${APP_NAME}</strong></p>
       </div>
@@ -83,39 +101,51 @@ const sendVerificationEmail = async (email, firstName, otp) => {
   });
 };
 
-const sendPasswordResetEmail = async (email, firstName, otp) => {
-  await sendEmail({
+const sendPasswordResetEmail = (email, firstName, otp) => {
+  return sendEmail({
     to: email,
-    subject: `Reset Your ${APP_NAME} Password`,
+    subject: `Password reset code - ${APP_NAME}`,
     html: `
-      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#222">
+      <div style="font-family:Arial,sans-serif;line-height:1.7;color:#222">
         <h2>Password Reset Request</h2>
         <p>Hello ${escapeHtml(firstName)},</p>
-        <p>Use the code below to reset your password.</p>
-        <div style="margin:25px 0;padding:20px;background:#f4f4f4;
-          text-align:center;border-radius:8px">
-          <h1 style="letter-spacing:8px;margin:0;font-size:32px">
-            ${otp}
-          </h1>
-        </div>
-        <p>This code expires in <strong>10 minutes</strong>.</p>
-        <p>If you did not request a password reset, ignore this email.</p>
+        <p>We received a request to reset your password.</p>
+        <p>Use the code below to continue:</p>
+        <h1 style="letter-spacing:8px;color:#25166B">${escapeHtml(otp)}</h1>
+        <p>This code expires in ${OTP_EXPIRY_MINUTES} minutes.</p>
+        <p>If you did not request a password reset, please ignore this email.</p>
         <p>Regards,<br/><strong>${APP_NAME}</strong></p>
       </div>
     `,
   });
 };
 
-const sendPasswordChangedEmail = async (email, firstName) => {
-  await sendEmail({
+const sendPasswordChangedEmail = (email, firstName) => {
+  return sendEmail({
     to: email,
-    subject: `Your ${APP_NAME} Password Was Changed`,
+    subject: `Password changed - ${APP_NAME}`,
     html: `
-      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#222">
+      <div style="font-family:Arial,sans-serif;line-height:1.7;color:#222">
         <h2>Password Changed Successfully</h2>
         <p>Hello ${escapeHtml(firstName)},</p>
-        <p>Your password has been changed successfully.</p>
-        <p>If you did not make this change, contact support immediately.</p>
+        <p>Your ${APP_NAME} account password has been changed successfully.</p>
+        <p>If you did not make this change, please contact support immediately.</p>
+        <p>Regards,<br/><strong>${APP_NAME}</strong></p>
+      </div>
+    `,
+  });
+};
+
+const sendWelcomeEmail = (user) => {
+  return sendEmail({
+    to: user.email,
+    subject: `Welcome to ${APP_NAME}`,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.7;color:#222">
+        <h2>Email Verified Successfully</h2>
+        <p>Hello ${escapeHtml(getFirstName(user))},</p>
+        <p>Your email address has been verified successfully.</p>
+        <p>You can now log in to your account.</p>
         <p>Regards,<br/><strong>${APP_NAME}</strong></p>
       </div>
     `,
@@ -124,48 +154,52 @@ const sendPasswordChangedEmail = async (email, firstName) => {
 
 /**
  * REGISTER
- * POST /api/auth/register
+ * Creates an account and sends the verification email in the background.
  */
 const register = async (req, res) => {
   try {
-    const { firstName, lastName, email, password } = req.body || {};
+    const { firstName, lastName, fullName, email, password } =
+      req.body || {};
 
-    if (
-      typeof firstName !== "string" ||
-      typeof lastName !== "string" ||
-      !firstName.trim() ||
-      !lastName.trim() ||
-      typeof email !== "string" ||
-      !email.trim() ||
-      typeof password !== "string" ||
-      !password
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "First name, last name, email and password are required",
-      });
-    }
-
-    if (password.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 8 characters",
-      });
-    }
-
-    const cleanFirstName = firstName.trim();
-    const cleanLastName = lastName.trim();
-    const fullName = `${cleanFirstName} ${cleanLastName}`;
     const normalizedEmail = normalizeEmail(email);
+
+    // Supports either fullName or firstName + lastName.
+    const suppliedName =
+      String(fullName || "").trim() ||
+      `${String(firstName || "").trim()} ${String(
+        lastName || ""
+      ).trim()}`.trim();
+
+    if (!suppliedName || !normalizedEmail || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, email and password are required.",
+      });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address.",
+      });
+    }
+
+    if (String(password).length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters long.",
+      });
+    }
 
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
+      select: { id: true },
     });
 
     if (existingUser) {
       return res.status(409).json({
         success: false,
-        message: "An account with this email already exists",
+        message: "An account with this email already exists.",
       });
     }
 
@@ -173,10 +207,9 @@ const register = async (req, res) => {
     const verificationOtp = generateOtp();
     const verificationOtpExpiresAt = getOtpExpiry();
 
-    // Save the combined name in the existing Prisma `name` field.
     const user = await prisma.user.create({
       data: {
-        name: fullName,
+        name: suppliedName,
         email: normalizedEmail,
         password: hashedPassword,
         emailVerified: false,
@@ -189,76 +222,70 @@ const register = async (req, res) => {
         uid: true,
         name: true,
         email: true,
-        emailVerified: true,
+        type: true,
         verified: true,
+        emailVerified: true,
         createdAt: true,
       },
     });
 
-    try {
-      await sendVerificationEmail(
-        normalizedEmail,
-        cleanFirstName,
-        verificationOtp
-      );
-    } catch (emailError) {
-      console.error("Registration email failed:", emailError.message);
-
-      // The account exists, so the user can request a new OTP.
-      return res.status(201).json({
-        success: true,
-        emailSent: false,
-        message:
-          "Your account was created, but the verification email could not be sent. Please request a new verification code.",
-        user,
-      });
-    }
+    // Do not wait for SMTP to finish.
+    sendEmailInBackground(
+      () =>
+        sendVerificationEmail(
+          normalizedEmail,
+          getFirstName(user),
+          verificationOtp
+        ),
+      "Registration verification email"
+    );
 
     return res.status(201).json({
       success: true,
-      emailSent: true,
+      emailQueued: true,
       message:
-        "Registration successful. Please check your email for the verification OTP.",
+        "Registration successful. Your verification code is being sent to your email.",
       user,
     });
   } catch (error) {
     console.error("Register error:", error);
 
-    if (error.code === "P2002") {
+    if (error?.code === "P2002") {
       return res.status(409).json({
         success: false,
-        message: "An account with this email already exists",
+        message: "An account with this email already exists.",
       });
     }
 
     return res.status(500).json({
       success: false,
-      message: "Unable to register at this time. Please try again.",
+      message: "Registration failed. Please try again.",
     });
   }
 };
 
 /**
  * VERIFY EMAIL
- * POST /api/auth/verify-email
  */
 const verifyEmail = async (req, res) => {
   try {
     const { email, otp } = req.body || {};
+    const normalizedEmail = normalizeEmail(email);
+    const submittedOtp = String(otp || "").trim();
 
-    if (
-      typeof email !== "string" ||
-      !email.trim() ||
-      typeof otp !== "string" ||
-      !/^\d{6}$/.test(otp)
-    ) {
+    if (!normalizedEmail || !submittedOtp) {
       return res.status(400).json({
         success: false,
-        message: "A valid email and 6-digit OTP are required",
+        message: "Email and verification code are required.",
       });
     }
 
-    const normalizedEmail = normalizeEmail(email);
+    if (!/^\d{6}$/.test(submittedOtp)) {
+      return res.status(400).json({
+        success: false,
+        message: "The verification code must contain 6 digits.",
+      });
+    }
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -267,35 +294,38 @@ const verifyEmail = async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found",
+        message: "User not found.",
       });
     }
 
-    if (user.emailVerified) {
+    if (user.emailVerified || user.verified) {
       return res.status(400).json({
         success: false,
-        message: "Email is already verified",
+        message: "This email address has already been verified.",
       });
     }
 
-    if (!user.verificationOtp || !user.verificationOtpExpiresAt) {
+    if (
+      !user.verificationOtp ||
+      !user.verificationOtpExpiresAt
+    ) {
       return res.status(400).json({
         success: false,
-        message: "No verification OTP found. Please request a new OTP.",
+        message: "No active verification code was found. Please request another code.",
       });
     }
 
-    if (user.verificationOtpExpiresAt < new Date()) {
+    if (new Date(user.verificationOtpExpiresAt) < new Date()) {
       return res.status(400).json({
         success: false,
-        message: "Verification OTP has expired. Please request a new one.",
+        message: "Your verification code has expired. Please request another code.",
       });
     }
 
-    if (user.verificationOtp !== otp) {
+    if (user.verificationOtp !== submittedOtp) {
       return res.status(400).json({
         success: false,
-        message: "Invalid verification OTP",
+        message: "Invalid verification code.",
       });
     }
 
@@ -311,35 +341,22 @@ const verifyEmail = async (req, res) => {
         id: true,
         uid: true,
         name: true,
-        username: true,
         email: true,
-        emailVerified: true,
+        type: true,
         verified: true,
-        createdAt: true,
+        emailVerified: true,
       },
     });
 
-    try {
-      await sendEmail({
-        to: updatedUser.email,
-        subject: `Welcome to ${APP_NAME}`,
-        html: `
-          <div style="font-family:Arial,sans-serif;line-height:1.6;color:#222">
-            <h2>Email Verified Successfully</h2>
-            <p>Hello ${escapeHtml(getFirstName(updatedUser))},</p>
-            <p>Your email address has been verified successfully.</p>
-            <p>You can now log in to your account.</p>
-            <p>Regards,<br/><strong>${APP_NAME}</strong></p>
-          </div>
-        `,
-      });
-    } catch (emailError) {
-      console.error("Welcome email failed:", emailError.message);
-    }
+    // The email is sent after the account has been verified.
+    sendEmailInBackground(
+      () => sendWelcomeEmail(updatedUser),
+      "Welcome email"
+    );
 
     return res.status(200).json({
       success: true,
-      message: "Email verified successfully",
+      message: "Email verified successfully. You can now log in.",
       user: updatedUser,
     });
   } catch (error) {
@@ -347,27 +364,25 @@ const verifyEmail = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Unable to verify email at this time. Please try again.",
+      message: "Email verification failed. Please try again.",
     });
   }
 };
 
 /**
- * RESEND VERIFICATION OTP
- * POST /api/auth/resend-verification
+ * RESEND VERIFICATION CODE
  */
 const resendVerification = async (req, res) => {
   try {
     const { email } = req.body || {};
+    const normalizedEmail = normalizeEmail(email);
 
-    if (typeof email !== "string" || !email.trim()) {
+    if (!normalizedEmail) {
       return res.status(400).json({
         success: false,
-        message: "Email is required",
+        message: "Email is required.",
       });
     }
-
-    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -376,36 +391,21 @@ const resendVerification = async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found",
+        message: "User not found.",
       });
     }
 
-    if (user.emailVerified) {
+    if (user.emailVerified || user.verified) {
       return res.status(400).json({
         success: false,
-        message: "Email is already verified",
+        message: "This email address has already been verified.",
       });
     }
 
     const verificationOtp = generateOtp();
     const verificationOtpExpiresAt = getOtpExpiry();
 
-    // Send first; only replace the stored code if delivery succeeds.
-    try {
-      await sendVerificationEmail(
-        normalizedEmail,
-        getFirstName(user),
-        verificationOtp
-      );
-    } catch (emailError) {
-      console.error("Resend verification email failed:", emailError.message);
-
-      return res.status(500).json({
-        success: false,
-        message: "Unable to send a verification code. Please try again.",
-      });
-    }
-
+    // Save the new OTP before scheduling the email.
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -414,9 +414,20 @@ const resendVerification = async (req, res) => {
       },
     });
 
+    sendEmailInBackground(
+      () =>
+        sendVerificationEmail(
+          user.email,
+          getFirstName(user),
+          verificationOtp
+        ),
+      "Resend verification email"
+    );
+
     return res.status(200).json({
       success: true,
-      message: "A new verification OTP has been sent to your email",
+      emailQueued: true,
+      message: "A new verification code is being sent to your email.",
     });
   } catch (error) {
     console.error("Resend verification error:", error);
@@ -430,20 +441,18 @@ const resendVerification = async (req, res) => {
 
 /**
  * LOGIN
- * POST /api/auth/login
  */
 const login = async (req, res) => {
   try {
     const { email, password } = req.body || {};
+    const normalizedEmail = normalizeEmail(email);
 
-    if (typeof email !== "string" || !email.trim() || !password) {
+    if (!normalizedEmail || !password) {
       return res.status(400).json({
         success: false,
-        message: "Email and password are required",
+        message: "Email and password are required.",
       });
     }
-
-    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -452,104 +461,95 @@ const login = async (req, res) => {
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: "Invalid email or password",
+        message: "Invalid email or password.",
       });
     }
 
-    const passwordMatch = await bcrypt.compare(password, user.password);
+    const passwordMatches = await bcrypt.compare(
+      password,
+      user.password
+    );
 
-    if (!passwordMatch) {
+    if (!passwordMatches) {
       return res.status(401).json({
         success: false,
-        message: "Invalid email or password",
+        message: "Invalid email or password.",
       });
     }
 
-    if (!user.emailVerified) {
+    if (!user.emailVerified && !user.verified) {
       return res.status(403).json({
         success: false,
-        message: "Please verify your email before logging in",
+        message: "Please verify your email before logging in.",
         emailVerified: false,
       });
     }
 
     const token = await generateToken(user);
 
+    const safeUser = {
+      id: user.id,
+      uid: user.uid,
+      name: user.name,
+      email: user.email,
+      type: user.type,
+      verified: user.verified,
+      emailVerified: user.emailVerified,
+      balance: user.balance,
+      btcBal: user.btcBal,
+      usdtBal: user.usdtBal,
+      ethBal: user.ethBal,
+      solBal: user.solBal,
+      profilePic: user.profilePic,
+    };
+
     return res.status(200).json({
       success: true,
-      message: "Login successful",
+      message: "Login successful.",
       token,
-      user: {
-        id: user.id,
-        uid: user.uid,
-        name: user.name,
-        username: user.username,
-        email: user.email,
-        emailVerified: user.emailVerified,
-        verified: user.verified,
-        type: user.type,
-      },
+      user: safeUser,
     });
   } catch (error) {
     console.error("Login error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Unable to log in at this time. Please try again.",
+      message: "Login failed. Please try again.",
     });
   }
 };
 
 /**
  * FORGOT PASSWORD
- * POST /api/auth/forgot-password
  */
 const forgotPassword = async (req, res) => {
+  const genericResponse = {
+    success: true,
+    message:
+      "If an account exists with that email, a password reset code will be sent.",
+  };
+
   try {
     const { email } = req.body || {};
-
-    if (typeof email !== "string" || !email.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required",
-      });
-    }
-
     const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail) {
+      return res.status(200).json(genericResponse);
+    }
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
-    // Do not reveal whether an account exists.
-    const genericMessage =
-      "If an account exists with this email, a password reset OTP will be sent.";
-
+    // Keep the response the same whether or not the account exists.
     if (!user) {
-      return res.status(200).json({
-        success: true,
-        message: genericMessage,
-      });
+      return res.status(200).json(genericResponse);
     }
 
     const resetPasswordOtp = generateOtp();
     const resetPasswordOtpExpiresAt = getOtpExpiry();
 
-    try {
-      await sendPasswordResetEmail(
-        normalizedEmail,
-        getFirstName(user),
-        resetPasswordOtp
-      );
-    } catch (emailError) {
-      console.error("Password reset email failed:", emailError.message);
-
-      return res.status(500).json({
-        success: false,
-        message: "Unable to send a password reset email. Please try again.",
-      });
-    }
-
+    // Store the OTP before sending the email in the background.
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -558,10 +558,17 @@ const forgotPassword = async (req, res) => {
       },
     });
 
-    return res.status(200).json({
-      success: true,
-      message: genericMessage,
-    });
+    sendEmailInBackground(
+      () =>
+        sendPasswordResetEmail(
+          user.email,
+          getFirstName(user),
+          resetPasswordOtp
+        ),
+      "Password reset email"
+    );
+
+    return res.status(200).json(genericResponse);
   } catch (error) {
     console.error("Forgot password error:", error);
 
@@ -574,89 +581,109 @@ const forgotPassword = async (req, res) => {
 
 /**
  * RESET PASSWORD
- * POST /api/auth/reset-password
  */
 const resetPassword = async (req, res) => {
   try {
-    const { email, otp, newPassword } = req.body || {};
+    const { email, otp, newPassword, confirmPassword } =
+      req.body || {};
+
+    const normalizedEmail = normalizeEmail(email);
+    const submittedOtp = String(otp || "").trim();
+
+    if (!normalizedEmail || !submittedOtp || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Email, reset code and new password are required.",
+      });
+    }
+
+    if (!/^\d{6}$/.test(submittedOtp)) {
+      return res.status(400).json({
+        success: false,
+        message: "The reset code must contain 6 digits.",
+      });
+    }
+
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters long.",
+      });
+    }
 
     if (
-      typeof email !== "string" ||
-      !email.trim() ||
-      typeof otp !== "string" ||
-      !/^\d{6}$/.test(otp) ||
-      typeof newPassword !== "string" ||
-      !newPassword
+      confirmPassword !== undefined &&
+      newPassword !== confirmPassword
     ) {
       return res.status(400).json({
         success: false,
-        message: "Email, valid 6-digit OTP and new password are required",
+        message: "Passwords do not match.",
       });
     }
-
-    if (newPassword.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 8 characters",
-      });
-    }
-
-    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
-    if (!user || !user.resetPasswordOtp) {
+    if (!user) {
       return res.status(400).json({
         success: false,
-        message: "Invalid password reset request",
+        message: "Invalid or expired password reset code.",
       });
     }
 
     if (
-      !user.resetPasswordOtpExpiresAt ||
-      user.resetPasswordOtpExpiresAt < new Date()
+      !user.resetPasswordOtp ||
+      !user.resetPasswordOtpExpiresAt
     ) {
       return res.status(400).json({
         success: false,
-        message: "Password reset OTP has expired",
+        message: "Invalid or expired password reset code.",
       });
     }
 
-    if (user.resetPasswordOtp !== otp) {
+    if (new Date(user.resetPasswordOtpExpiresAt) < new Date()) {
       return res.status(400).json({
         success: false,
-        message: "Invalid password reset OTP",
+        message: "Your password reset code has expired.",
+      });
+    }
+
+    if (user.resetPasswordOtp !== submittedOtp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired password reset code.",
       });
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
         password: hashedPassword,
         resetPasswordOtp: null,
         resetPasswordOtpExpiresAt: null,
       },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
     });
 
-    try {
-      await sendPasswordChangedEmail(
-        normalizedEmail,
-        getFirstName(user)
-      );
-    } catch (emailError) {
-      console.error(
-        "Password reset confirmation email failed:",
-        emailError.message
-      );
-    }
+    sendEmailInBackground(
+      () =>
+        sendPasswordChangedEmail(
+          updatedUser.email,
+          getFirstName(updatedUser)
+        ),
+      "Password reset confirmation email"
+    );
 
     return res.status(200).json({
       success: true,
-      message: "Password reset successfully",
+      message: "Password reset successfully. You can now log in.",
     });
   } catch (error) {
     console.error("Reset password error:", error);
@@ -670,46 +697,50 @@ const resetPassword = async (req, res) => {
 
 /**
  * CHANGE PASSWORD
- * POST /api/auth/change-password
- * Requires your authentication middleware.
+ * Requires your existing authentication middleware.
  */
 const changePassword = async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body || {};
+    const { currentPassword, newPassword, confirmPassword } =
+      req.body || {};
 
-    if (
-      typeof currentPassword !== "string" ||
-      !currentPassword ||
-      typeof newPassword !== "string" ||
-      !newPassword
-    ) {
-      return res.status(400).json({
+    const userId = Number(req.user?.id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({
         success: false,
-        message: "Current password and new password are required",
+        message: "Authentication required.",
       });
     }
 
-    if (newPassword.length < 8) {
+    if (!currentPassword || !newPassword) {
       return res.status(400).json({
         success: false,
-        message: "New password must be at least 8 characters",
+        message: "Current password and new password are required.",
+      });
+    }
+
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 8 characters long.",
+      });
+    }
+
+    if (
+      confirmPassword !== undefined &&
+      newPassword !== confirmPassword
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "New passwords do not match.",
       });
     }
 
     if (currentPassword === newPassword) {
       return res.status(400).json({
         success: false,
-        message: "Your new password must differ from your current password",
-      });
-    }
-
-    // Your JWT must contain the user's numeric database ID.
-    const userId = Number(req.user?.id);
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(401).json({
-        success: false,
-        message: "Please log in again",
+        message: "Your new password must be different from your current password.",
       });
     }
 
@@ -720,44 +751,48 @@ const changePassword = async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found",
+        message: "User not found.",
       });
     }
 
-    const passwordMatch = await bcrypt.compare(
+    const passwordMatches = await bcrypt.compare(
       currentPassword,
       user.password
     );
 
-    if (!passwordMatch) {
+    if (!passwordMatches) {
       return res.status(400).json({
         success: false,
-        message: "Current password is incorrect",
+        message: "Your current password is incorrect.",
       });
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: user.id },
-      data: { password: hashedPassword },
+      data: {
+        password: hashedPassword,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
     });
 
-    try {
-      await sendPasswordChangedEmail(
-        user.email,
-        getFirstName(user)
-      );
-    } catch (emailError) {
-      console.error(
-        "Password change email failed:",
-        emailError.message
-      );
-    }
+    sendEmailInBackground(
+      () =>
+        sendPasswordChangedEmail(
+          updatedUser.email,
+          getFirstName(updatedUser)
+        ),
+      "Password change confirmation email"
+    );
 
     return res.status(200).json({
       success: true,
-      message: "Password changed successfully",
+      message: "Password changed successfully.",
     });
   } catch (error) {
     console.error("Change password error:", error);
