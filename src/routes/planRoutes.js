@@ -1,6 +1,5 @@
 
 const express = require("express");
-
 const router = express.Router();
 
 const {
@@ -8,32 +7,16 @@ const {
   getPlanById,
 } = require("../controllers/planController");
 
-const {
-  verifyToken,
-  checkUser,
-} = require("../middleware/auth");
+// const {
+//   verifyToken,
+//   checkUser,
+// } = require("../middleware/auth");
 
-// Get all plans
-router.get(
-  "/all",
-  verifyToken,
-  checkUser,
-  getAllPlans
-);
+// Get all plans — PUBLIC
+// Visitors can view plans without logging in
+router.get("/all", getAllPlans);
 
-// Get a single plan
-router.get(
-  "/:id",
-  verifyToken,
-  checkUser,
-  getPlanById
-);
-
-//get all plans everyone
-
-router.get(
-  "/all",
-  getAllPlans
-)
+// Get a single plan — PUBLIC
+router.get("/:id", getPlanById);
 
 module.exports = router;
