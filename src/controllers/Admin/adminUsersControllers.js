@@ -434,8 +434,8 @@ const adjustUserBalance = async (req, res) => {
 
     // 6. Read the selected balance.
     // These fields are assumed to be String fields in Prisma.
-    const storedBalance = user[balanceField] ?? "0";
-    const previousBalance = Number(storedBalance);
+   const storedBalance = user[balanceField] ?? 0;
+const previousBalance = Number(storedBalance);
 
     if (
       !Number.isFinite(previousBalance) ||
@@ -469,9 +469,7 @@ const adjustUserBalance = async (req, res) => {
         ? previousBalance + adjustmentAmount
         : previousBalance - adjustmentAmount;
 
-    const balanceToStore = String(
-      Number(calculatedBalance.toFixed(8))
-    );
+  const balanceToStore = Number(calculatedBalance.toFixed(8));
 
     // 9. Update the balance transactionally.
     // Only update if the stored balance has not changed since it was read.
