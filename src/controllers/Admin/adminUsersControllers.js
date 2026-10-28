@@ -321,19 +321,34 @@ const deleteUser = async (req, res) => {
   }
 };
 
-//========================
-//Top Up User acct 
-//======================
+
 
 
 
 /* ============================================
    ADMIN TOP UP USER ACCOUNT
 ============================================ */
-const topUpUser = async (req, res) => {
+
+/**
+ * ADMIN: ADD OR DEDUCT CRYPTO FUNDS
+ *
+ * POST /api/admin/users/:uid/adjust-balance
+ *
+ * Request body:
+ * {
+ *   "action": "add",
+ *   "currency": "BTC",
+ *   "amount": 0.005
+ * }
+ *
+ * Supported actions: add, deduct
+ * Supported currencies: BTC, SOL, ETH
+ */
+
+const adjustUserBalance = async (req, res) => {
   try {
     const { uid } = req.params;
-    const { amount } = req.body;
+    const { action, currency, amount } = req.body;
 
     // Validate user UID
     if (!uid || typeof uid !== "string" || !uid.trim()) {
@@ -342,23 +357,50 @@ const topUpUser = async (req, res) => {
       });
     }
 
-    // Validate top-up amount
-    const topUpAmount = Number(amount);
+    // Validate action
+    if (!["add", "deduct"].includes(action)) {
+      return res.status(400).json({
+        message: 'Action must be either "add" or "deduct".',
+      });
+    }
+
+    // Map supported currencies to Prisma user fields
+    const currencyFields = {
+      BTC: "bitcoin",
+      SOL: "sol",
+      ETH: "ethereum",
+    };
+
+    const normalizedCurrency =
+      typeof currency === "string" ? currency.toUpperCase() : "";
+
+    const balanceField = currencyFields[normalizedCurrency];
+
+    if (!balanceField) {
+      return res.status(400).json({
+        message: "Currency must be BTC, SOL, or ETH.",
+      });
+    }
+
+    // Validate amount: allow up to 8 decimal places
+    const adjustmentAmount = Number(amount);
 
     if (
       amount === undefined ||
       amount === null ||
       amount === "" ||
-      !Number.isFinite(topUpAmount) ||
-      topUpAmount <= 0 ||
-      Math.round(topUpAmount * 100) !== topUpAmount * 100
+      !Number.isFinite(adjustmentAmount) ||
+      adjustmentAmount <= 0 ||
+      Math.round(adjustmentAmount * 100000000) !==
+        adjustmentAmount * 100000000
     ) {
       return res.status(400).json({
-        message: "Amount must be a valid positive number with at most 2 decimal places.",
+        message:
+          "Amount must be positive and have no more than 8 decimal places.",
       });
     }
 
-    // Find user by UID
+    // Check that the user exists
     const user = await prisma.user.findFirst({
       where: { uid: uid.trim() },
       select: {
@@ -367,7 +409,9 @@ const topUpUser = async (req, res) => {
         name: true,
         username: true,
         email: true,
-        balance: true,
+        bitcoin: true,
+        sol: true,
+        ethereum: true,
       },
     });
 
@@ -377,62 +421,128 @@ const topUpUser = async (req, res) => {
       });
     }
 
-    // Update the balance atomically inside a transaction
-    const updatedUser = await prisma.$transaction(async (tx) => {
-      return await tx.user.update({
-        where: { id: user.id },
+    const previousBalance = Number(user[balanceField] ?? 0);
+
+    // Prevent deductions that exceed the available balance.
+    if (
+      action === "deduct" &&
+      previousBalance < adjustmentAmount
+    ) {
+      return res.status(400).json({
+        message: `Insufficient ${normalizedCurrency} balance.`,
         data: {
-          balance: {
-            increment: topUpAmount,
-          },
+          currency: normalizedCurrency,
+          availableBalance: previousBalance,
+          requestedAmount: adjustmentAmount,
         },
+      });
+    }
+
+    // Perform the adjustment atomically.
+    // The balance condition prevents concurrent deductions from
+    // reducing the wallet below zero.
+    const result = await prisma.$transaction(async (tx) => {
+      const updateResult = await tx.user.updateMany({
+        where: {
+          id: user.id,
+          ...(action === "deduct"
+            ? {
+                [balanceField]: {
+                  gte: adjustmentAmount,
+                },
+              }
+            : {}),
+        },
+        data: {
+          [balanceField]:
+            action === "add"
+              ? { increment: adjustmentAmount }
+              : { decrement: adjustmentAmount },
+        },
+      });
+
+      if (updateResult.count === 0) {
+        const currentUser = await tx.user.findUnique({
+          where: { id: user.id },
+          select: { [balanceField]: true },
+        });
+
+        if (!currentUser) {
+          const error = new Error("User not found.");
+          error.statusCode = 404;
+          throw error;
+        }
+
+        const error = new Error(
+          `Insufficient ${normalizedCurrency} balance.`
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+
+      return tx.user.findUnique({
+        where: { id: user.id },
         select: {
           id: true,
           uid: true,
           name: true,
           username: true,
           email: true,
-          balance: true,
+          bitcoin: true,
+          sol: true,
+          ethereum: true,
         },
       });
     });
 
-    // Record the action in server logs.
-    // Ensure your admin authentication middleware populates req.user.
-    console.info("Admin account top-up completed", {
+    const newBalance = Number(result[balanceField] ?? 0);
+
+    // Log the operation for operational monitoring.
+    console.info("Admin crypto balance adjustment", {
       adminId: req.user?.id ?? req.user?.uid ?? "unknown",
-      userUid: updatedUser.uid,
-      amount: topUpAmount,
-      previousBalance: user.balance,
-      newBalance: updatedUser.balance,
+      userUid: user.uid,
+      action,
+      currency: normalizedCurrency,
+      amount: adjustmentAmount,
+      previousBalance,
+      newBalance,
       timestamp: new Date().toISOString(),
     });
 
     return res.status(200).json({
-      message: "User account topped up successfully.",
+      message:
+        action === "add"
+          ? `${normalizedCurrency} added successfully.`
+          : `${normalizedCurrency} deducted successfully.`,
       data: {
-        user: updatedUser,
-        topUp: {
-          amount: topUpAmount,
-          previousBalance: user.balance,
-          newBalance: updatedUser.balance,
+        user: result,
+        adjustment: {
+          action,
+          currency: normalizedCurrency,
+          amount: adjustmentAmount,
+          previousBalance,
+          newBalance,
         },
       },
     });
   } catch (error) {
-    console.error("Admin top-up user error:", error);
+    console.error("Admin crypto balance adjustment error:", error);
 
-    return res.status(500).json({
-      message: "Unable to top up user account.",
+    return res.status(error.statusCode || 500).json({
+      message:
+        error.statusCode === 400 || error.statusCode === 404
+          ? error.message
+          : "Unable to adjust user crypto balance.",
     });
   }
 };
+
 
 
 module.exports = {
   getAllUsers,
   getUserByUid,
   deleteUser,
-  topUpUser,
+  adjustUserBalance,
 };
 
