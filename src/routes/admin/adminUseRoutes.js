@@ -1,10 +1,11 @@
+
 const express = require("express");
 
 const {
   getAllUsers,
   getUserByUid,
   deleteUser,
-  topUpUser,
+  adjustUserBalance,
 } = require("../../controllers/Admin/adminUsersControllers");
 
 const {
@@ -23,12 +24,12 @@ router.get("/:uid", verifyToken, checkAdmin, getUserByUid);
 // DELETE /api/admin/users/:uid
 router.delete("/:uid", verifyToken, checkAdmin, deleteUser);
 
-// Post /api/admin/users/:uid/top-up
+// POST /api/admin/users/:uid/adjust-balance
 router.post(
-  "/:uid/top-up",
+  "/:uid/adjust-balance",
   verifyToken,
   checkAdmin,
-  topUpUser
+  adjustUserBalance
 );
 
 module.exports = router;
