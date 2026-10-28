@@ -4,6 +4,7 @@ const {
   getAllUsers,
   getUserByUid,
   deleteUser,
+  topUpUser,
 } = require("../../controllers/Admin/adminUsersControllers");
 
 const {
@@ -21,5 +22,13 @@ router.get("/:uid", verifyToken, checkAdmin, getUserByUid);
 
 // DELETE /api/admin/users/:uid
 router.delete("/:uid", verifyToken, checkAdmin, deleteUser);
+
+// Post /api/admin/users/:uid/top-up
+router.post(
+  "/users/:uid/top-up",
+  verifyToken,
+  checkAdmin,
+  topUpUser
+);
 
 module.exports = router;

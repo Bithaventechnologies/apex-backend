@@ -321,9 +321,118 @@ const deleteUser = async (req, res) => {
   }
 };
 
+//========================
+//Top Up User acct 
+//======================
+
+
+
+/* ============================================
+   ADMIN TOP UP USER ACCOUNT
+============================================ */
+const topUpUser = async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const { amount } = req.body;
+
+    // Validate user UID
+    if (!uid || typeof uid !== "string" || !uid.trim()) {
+      return res.status(400).json({
+        message: "A valid user UID is required.",
+      });
+    }
+
+    // Validate top-up amount
+    const topUpAmount = Number(amount);
+
+    if (
+      amount === undefined ||
+      amount === null ||
+      amount === "" ||
+      !Number.isFinite(topUpAmount) ||
+      topUpAmount <= 0 ||
+      Math.round(topUpAmount * 100) !== topUpAmount * 100
+    ) {
+      return res.status(400).json({
+        message: "Amount must be a valid positive number with at most 2 decimal places.",
+      });
+    }
+
+    // Find user by UID
+    const user = await prisma.user.findFirst({
+      where: { uid: uid.trim() },
+      select: {
+        id: true,
+        uid: true,
+        name: true,
+        username: true,
+        email: true,
+        balance: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found.",
+      });
+    }
+
+    // Update the balance atomically inside a transaction
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      return await tx.user.update({
+        where: { id: user.id },
+        data: {
+          balance: {
+            increment: topUpAmount,
+          },
+        },
+        select: {
+          id: true,
+          uid: true,
+          name: true,
+          username: true,
+          email: true,
+          balance: true,
+        },
+      });
+    });
+
+    // Record the action in server logs.
+    // Ensure your admin authentication middleware populates req.user.
+    console.info("Admin account top-up completed", {
+      adminId: req.user?.id ?? req.user?.uid ?? "unknown",
+      userUid: updatedUser.uid,
+      amount: topUpAmount,
+      previousBalance: user.balance,
+      newBalance: updatedUser.balance,
+      timestamp: new Date().toISOString(),
+    });
+
+    return res.status(200).json({
+      message: "User account topped up successfully.",
+      data: {
+        user: updatedUser,
+        topUp: {
+          amount: topUpAmount,
+          previousBalance: user.balance,
+          newBalance: updatedUser.balance,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Admin top-up user error:", error);
+
+    return res.status(500).json({
+      message: "Unable to top up user account.",
+    });
+  }
+};
+
+
 module.exports = {
   getAllUsers,
   getUserByUid,
   deleteUser,
+  topUpUser,
 };
 
