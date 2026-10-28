@@ -25,7 +25,7 @@ router.delete("/:uid", verifyToken, checkAdmin, deleteUser);
 
 // Post /api/admin/users/:uid/top-up
 router.post(
-  "/users/:uid/top-up",
+  "/:uid/top-up",
   verifyToken,
   checkAdmin,
   topUpUser
