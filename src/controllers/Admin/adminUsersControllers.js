@@ -345,6 +345,7 @@ const deleteUser = async (req, res) => {
  * Supported currencies: BTC, SOL, ETH
  */
 
+
 const adjustUserBalance = async (req, res) => {
   try {
     const { uid } = req.params;
@@ -364,7 +365,7 @@ const adjustUserBalance = async (req, res) => {
       });
     }
 
-    // Map supported currencies to Prisma user fields
+    // Map currencies to Prisma user fields
     const currencyFields = {
       BTC: "bitcoin",
       SOL: "sol",
@@ -382,7 +383,7 @@ const adjustUserBalance = async (req, res) => {
       });
     }
 
-    // Validate amount: allow up to 8 decimal places
+    // Validate amount: positive number, maximum 8 decimal places
     const adjustmentAmount = Number(amount);
 
     if (
@@ -400,9 +401,11 @@ const adjustUserBalance = async (req, res) => {
       });
     }
 
-    // Check that the user exists
+    // Find the user
     const user = await prisma.user.findFirst({
-      where: { uid: uid.trim() },
+      where: {
+        uid: uid.trim(),
+      },
       select: {
         id: true,
         uid: true,
@@ -421,9 +424,20 @@ const adjustUserBalance = async (req, res) => {
       });
     }
 
-    const previousBalance = Number(user[balanceField] ?? 0);
+    // Convert the stored String balance to a number for calculation
+    const storedBalance = user[balanceField] ?? "0";
+    const previousBalance = Number(storedBalance);
 
-    // Prevent deductions that exceed the available balance.
+    if (
+      !Number.isFinite(previousBalance) ||
+      previousBalance < 0
+    ) {
+      return res.status(400).json({
+        message: `The user's ${normalizedCurrency} balance is invalid.`,
+      });
+    }
+
+    // Prevent deductions greater than the available balance
     if (
       action === "deduct" &&
       previousBalance < adjustmentAmount
@@ -438,50 +452,41 @@ const adjustUserBalance = async (req, res) => {
       });
     }
 
-    // Perform the adjustment atomically.
-    // The balance condition prevents concurrent deductions from
-    // reducing the wallet below zero.
+    // Calculate the new balance
+    const calculatedBalance =
+      action === "add"
+        ? previousBalance + adjustmentAmount
+        : previousBalance - adjustmentAmount;
+
+    // Avoid floating-point residue and store as a String
+    const newBalance = Number(calculatedBalance.toFixed(8));
+    const balanceToStore = String(newBalance);
+
+    // Update inside a transaction.
+    // The balance condition detects if the value changed since it was read.
     const result = await prisma.$transaction(async (tx) => {
       const updateResult = await tx.user.updateMany({
         where: {
           id: user.id,
-          ...(action === "deduct"
-            ? {
-                [balanceField]: {
-                  gte: adjustmentAmount,
-                },
-              }
-            : {}),
+          [balanceField]: storedBalance,
         },
         data: {
-          [balanceField]:
-            action === "add"
-              ? { increment: adjustmentAmount }
-              : { decrement: adjustmentAmount },
+          [balanceField]: balanceToStore,
         },
       });
 
       if (updateResult.count === 0) {
-        const currentUser = await tx.user.findUnique({
-          where: { id: user.id },
-          select: { [balanceField]: true },
-        });
-
-        if (!currentUser) {
-          const error = new Error("User not found.");
-          error.statusCode = 404;
-          throw error;
-        }
-
         const error = new Error(
-          `Insufficient ${normalizedCurrency} balance.`
+          "The balance changed during this request. Please refresh and try again."
         );
-        error.statusCode = 400;
+        error.statusCode = 409;
         throw error;
       }
 
-      return tx.user.findUnique({
-        where: { id: user.id },
+      const updatedUser = await tx.user.findUnique({
+        where: {
+          id: user.id,
+        },
         select: {
           id: true,
           uid: true,
@@ -493,11 +498,19 @@ const adjustUserBalance = async (req, res) => {
           ethereum: true,
         },
       });
+
+      if (!updatedUser) {
+        const error = new Error("User not found after balance update.");
+        error.statusCode = 404;
+        throw error;
+      }
+
+      return updatedUser;
     });
 
-    const newBalance = Number(result[balanceField] ?? 0);
+    const actualNewBalance = Number(result[balanceField] ?? "0");
 
-    // Log the operation for operational monitoring.
+    // Operational log
     console.info("Admin crypto balance adjustment", {
       adminId: req.user?.id ?? req.user?.uid ?? "unknown",
       userUid: user.uid,
@@ -505,11 +518,13 @@ const adjustUserBalance = async (req, res) => {
       currency: normalizedCurrency,
       amount: adjustmentAmount,
       previousBalance,
-      newBalance,
+      newBalance: actualNewBalance,
       timestamp: new Date().toISOString(),
     });
 
+    // Success response
     return res.status(200).json({
+      success: true,
       message:
         action === "add"
           ? `${normalizedCurrency} added successfully.`
@@ -521,21 +536,29 @@ const adjustUserBalance = async (req, res) => {
           currency: normalizedCurrency,
           amount: adjustmentAmount,
           previousBalance,
-          newBalance,
+          newBalance: actualNewBalance,
         },
       },
     });
   } catch (error) {
     console.error("Admin crypto balance adjustment error:", error);
 
-    return res.status(error.statusCode || 500).json({
+    const statusCode = [400, 404, 409].includes(error.statusCode)
+      ? error.statusCode
+      : 500;
+
+    return res.status(statusCode).json({
+      success: false,
       message:
-        error.statusCode === 400 || error.statusCode === 404
+        statusCode !== 500
           ? error.message
           : "Unable to adjust user crypto balance.",
     });
   }
 };
+
+export { adjustUserBalance };
+
 
 
 
